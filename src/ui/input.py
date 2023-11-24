@@ -1,158 +1,107 @@
+import json
 import os
-
-import supervisely as sly
-from supervisely.app.widgets import (
-    Card,
-    SelectDataset,
-    Button,
-    Container,
-    DatasetThumbnail,
-    Text,
-)
+import time
+from tqdm import tqdm
+import cv2
+import numpy as np
 
 import src.globals as g
-import src.ui.settings as settings
-
-dataset_thumbnail = DatasetThumbnail()
-dataset_thumbnail.hide()
-
-load_button = Button("Load data")
-change_dataset_button = Button("Change dataset", icon="zmdi zmdi-lock-open")
-change_dataset_button.hide()
-
-no_dataset_message = Text(
-    "Please, select a dataset before clicking the button.",
-    status="warning",
+import src.utils as u
+import supervisely as sly
+from supervisely.io.fs import get_file_name_with_ext
+from supervisely.app.widgets import (
+    Button,
+    Card,
+    Container,
+    Editor,
+    Empty,
+    Image,
+    SelectItem,
+    Text,
+    SelectProject,
 )
-no_dataset_message.hide()
 
-if g.STATE.selected_dataset and g.STATE.selected_project:
-    # If the app was loaded from a dataset.
-    sly.logger.debug("App was loaded from a dataset.")
+import dataset_tools as dtools
 
-    # Stting values to the widgets from environment variables.
-    select_dataset = SelectDataset(
-        default_id=g.STATE.selected_dataset, project_id=g.STATE.selected_project
-    )
+button_stats = Button(text="Calculate")
+# button_save = Button(text="Save settings")
+# infotext = Text("Settings saved", "success")
+# select_item = SelectItem(dataset_id=None, compact=False)
 
-    # Hiding unnecessary widgets.
-    select_dataset.hide()
-    load_button.hide()
+select_item = SelectProject(g.PROJECT_ID, g.WORKSPACE_ID)
 
-    # Creating a dataset thumbnail to show.
-    dataset_thumbnail.set(
-        g.api.project.get_info_by_id(g.STATE.selected_project),
-        g.api.dataset.get_info_by_id(g.STATE.selected_dataset),
-    )
-    dataset_thumbnail.show()
 
-    settings.card.unlock()
-    settings.card.uncollapse()
-elif g.STATE.selected_project:
-    # If the app was loaded from a project: showing the dataset selector in compact mode.
-    sly.logger.debug("App was loaded from a project.")
-
-    select_dataset = SelectDataset(
-        project_id=g.STATE.selected_project, compact=True, show_label=False
-    )
-else:
-    # If the app was loaded from ecosystem: showing the dataset selector in full mode.
-    sly.logger.debug("App was loaded from ecosystem.")
-
-    select_dataset = SelectDataset()
-
-# Input card with all widgets.
-card = Card(
-    "1️⃣ Input dataset",
-    "Images from the selected dataset will be loaded.",
+card_1 = Card(
+    title="Calculate stats",
     content=Container(
         widgets=[
-            dataset_thumbnail,
-            select_dataset,
-            load_button,
-            no_dataset_message,
+            select_item,
+            button_stats,
         ]
     ),
-    content_top_right=change_dataset_button,
-    collapsable=True,
 )
 
-
-@load_button.click
-def load_dataset():
-    """Handles the load button click event. Reading values from the SelectDataset widget,
-    calling the API to get project, workspace and team ids (if they're not set),
-    building the table with images and unlocking the rotator and output cards.
-    """
-    # Reading the dataset id from SelectDataset widget.
-    dataset_id = select_dataset.get_selected_id()
-
-    if not dataset_id:
-        # If the dataset id is empty, showing the warning message.
-        no_dataset_message.show()
-        return
-
-    # Hide the warning message if dataset was selected.
-    no_dataset_message.hide()
-
-    # Changing the values of the global variables to access them from other modules.
-    g.STATE.selected_dataset = dataset_id
-
-    # Cleaning the static directory when the new dataset is selected.
-    # * If needed, this code can be securely removed.
-    clean_static_dir()
-
-    # Disabling the dataset selector and the load button.
-    select_dataset.disable()
-    load_button.hide()
-
-    # Showing the lock checkbox for unlocking the dataset selector and button.
-    change_dataset_button.show()
-
-    sly.logger.debug(
-        f"Calling API with dataset ID {dataset_id} to get project, workspace and team IDs."
-    )
-
-    g.STATE.selected_project = g.api.dataset.get_info_by_id(dataset_id).project_id
-    g.STATE.selected_workspace = g.api.project.get_info_by_id(
-        g.STATE.selected_project
-    ).workspace_id
-    g.STATE.selected_team = g.api.workspace.get_info_by_id(
-        g.STATE.selected_workspace
-    ).team_id
-
-    sly.logger.debug(
-        f"Recived IDs from the API. Selected team: {g.STATE.selected_team}, "
-        f"selected workspace: {g.STATE.selected_workspace}, selected project: {g.STATE.selected_project}"
-    )
-
-    dataset_thumbnail.set(
-        g.api.project.get_info_by_id(g.STATE.selected_project),
-        g.api.dataset.get_info_by_id(g.STATE.selected_dataset),
-    )
-    dataset_thumbnail.show()
-
-    settings.card.unlock()
-    settings.card.uncollapse()
-
-    card.lock()
+# infotext.hide()
 
 
-def clean_static_dir():
-    # * Utility function to clean static directory, it can be securely removed if not needed.
-    static_files = os.listdir(g.STATIC_DIR)
+@button_stats.click
+def calculate() -> None:
+    # settings = json.loads(editor.get_text())
 
-    sly.logger.debug(
-        f"Cleaning static directory. Number of files to delete: {len(static_files)}."
-    )
+    # item_id = select_item.get_selected_id()
+    project_meta = sly.ProjectMeta.from_json(g.api.project.get_meta(g.PROJECT_ID))
+    project_info = g.api.project.get_info_by_id(g.PROJECT_ID)
 
-    for static_file in static_files:
-        os.remove(os.path.join(g.STATIC_DIR, static_file))
+    project_stats = g.api.project.get_stats(g.PROJECT_ID)
+    datasets = g.api.dataset.get_list(g.PROJECT_ID)
 
+    # image = g.api.image.get_info_by_id(item_id)
+    # jann = g.api.annotation.download_json(item_id)
+    # ann = sly.Annotation.from_json(jann, project_meta)
 
-@change_dataset_button.click
-def handle_input():
-    card.unlock()
-    select_dataset.enable()
-    load_button.show()
-    change_dataset_button.hide()
+    # pseudocode
+    def smart_cache(anns, dataset):
+        forced_anns = []
+
+        anns = g.api.annotation.get_list(dataset.id)
+        for ann in anns:
+            if change_in_label or new_label_added:
+                forced_anns.append(ann)
+
+        return forced_anns
+
+    stat_cache = {}
+
+    stats = [
+        dtools.ClassBalance(project_meta, project_stats, stat_cache=stat_cache),
+        dtools.ClassCooccurrence(project_meta),
+        dtools.ClassesPerImage(
+            project_meta, project_stats, datasets, stat_cache=stat_cache
+        ),
+        dtools.ObjectsDistribution(project_meta),
+        dtools.ObjectSizes(project_meta, project_stats),
+        dtools.ClassSizes(project_meta),
+        # dtools.ClassesTreemap(project_meta),
+        # dtools.AnomalyReport(),  # ?
+    ]
+
+    srate = 1
+
+    dtools.count_stats(g.PROJECT_ID, project_stats, stats=stats, sample_rate=srate)
+
+    sly.logger.info("Saving stats...")
+    for stat in stats:
+        sly.logger.info(f"Saving {stat.basename_stem}...")
+        if stat.to_json() is not None:
+            with open(f"{g.STORAGE_DIR}/{stat.basename_stem}.json", "w") as f:
+                json.dump(stat.to_json(), f)
+
+        stat.to_image(f"{g.STORAGE_DIR}/{stat.basename_stem}.png")
+
+    json_paths = sly.fs.list_files(g.STORAGE_DIR, valid_extensions=[".json"])
+    dst_paths = [
+        f"{g.DST_TF_DIR}/{get_file_name_with_ext(path)}" for path in json_paths
+    ]
+
+    pbar = tqdm(desc="Uploading", total=len(json_paths), unit="B", unit_scale=True)
+    g.api.file.upload_bulk(g.TEAM_ID, json_paths, dst_paths, pbar)
