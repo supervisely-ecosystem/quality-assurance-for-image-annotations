@@ -14,8 +14,9 @@ api = sly.Api.from_env()
 
 TEAM_ID = sly.env.team_id()
 WORKSPACE_ID = sly.env.workspace_id()
-PROJECT_ID = sly.env.project_id()
-# DATASET_ID = sly.env.dataset_id(raise_not_found=False)
+
 
 STORAGE_DIR = sly.app.get_data_dir()
-DST_TF_DIR = "/stats/"
+TF_STATS_DIR = "/stats/"
+
+IMAGES_CACHE = {}
