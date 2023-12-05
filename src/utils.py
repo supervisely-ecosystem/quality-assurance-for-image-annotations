@@ -26,15 +26,23 @@ from dataset_tools.text.generate_summary import list2sentence
 import src.globals as g
 
 
-# pseudocode
-def get_updated_images(project_info, project_meta):
+def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMeta):
     updated_images = []
     images_flat = []
 
-    # anns = g.api.annotation.get_list(dataset.id)
-
     for dataset in g.api.dataset.get_list(project_info.id):
         images_flat += g.api.image.get_list(dataset.id)
+
+    if g.META_CACHE.get(project_info.id) is not None:
+        if len(g.META_CACHE[project_info.id].obj_classes) != len(
+            project_meta.obj_classes
+        ):
+            sly.logger.warn(
+                "Changes in the number of classes detected. Recalculate full stats... #TODO"
+            )
+            g.META_CACHE[project_info.id] = project_meta
+            return images_flat
+    g.META_CACHE[project_info.id] = project_meta
 
     for image in images_flat:
         try:
@@ -42,12 +50,25 @@ def get_updated_images(project_info, project_meta):
             cached = g.IMAGES_CACHE[image.id]
             if image.updated_at != cached.updated_at:
                 updated_images.append(image)
+                g.IMAGES_CACHE[image.id] = image
         except KeyError:
-            g.IMAGES_CACHE[image.id] = image
             updated_images.append(image)
-
-    # for ann in anns:
-    #     if change_in_label or new_label_added:
-    #         forced_anns.append(ann)
+            g.IMAGES_CACHE[image.id] = image
 
     return updated_images
+
+
+def get_indexes_dct(project_id):
+    for dataset in g.api.dataset.get_list(project_id):
+        images_all = g.api.image.get_list(dataset.id)
+        images_all = sorted(images_all, key=lambda x: x.id)
+
+        idx_to_infos, infos_to_idx = {}, {}
+
+        for idx, image_batch in enumerate(sly.batched(images_all, g.BATCH_SIZE)):
+            identifier = f"chunk_{idx}_{dataset.id}_{project_id}"
+            for image in image_batch:
+                infos_to_idx[image.id] = identifier
+            idx_to_infos[identifier] = image_batch
+
+    return idx_to_infos, infos_to_idx
