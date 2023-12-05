@@ -17,7 +17,7 @@ WORKSPACE_ID = sly.env.workspace_id()
 
 
 STORAGE_DIR = sly.app.get_data_dir()
-TF_STATS_DIR = "/stats/"
+TF_STATS_DIR = "/stats"
 
 IMAGES_CACHE = {}
 META_CACHE = {}

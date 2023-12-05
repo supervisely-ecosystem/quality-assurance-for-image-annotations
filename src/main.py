@@ -1,7 +1,7 @@
 from datetime import datetime
 import json, os
 import numpy as np
-
+import math
 import src.globals as g
 import src.utils as u
 import supervisely as sly
@@ -29,12 +29,17 @@ server = app.get_server()
 async def stats_endpoint(project_id: int):
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
-    project_info = g.api.project.get_info_by_id(project_id)
+    project = g.api.project.get_info_by_id(project_id)
 
-    updated_images = u.get_updated_images(project_info, project_meta)
+    updated_images = u.get_updated_images(project, project_meta)
 
     project_stats = g.api.project.get_stats(project_id)
     datasets = g.api.dataset.get_list(project_id)
+
+    curr_projectfs_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
+    os.makedirs(curr_projectfs_dir, exist_ok=True)
+
+    curr_teamfiles_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
 
     # with open(f"{g.STORAGE_DIR}/meta.json", "w") as f:
     #     json.dump(json_project_meta, f)
@@ -56,26 +61,27 @@ async def stats_endpoint(project_id: int):
     else:
         idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id)
 
-        if sly.fs.dir_empty(g.STORAGE_DIR):
+        if sly.fs.dir_empty(curr_projectfs_dir):
             sly.logger.info("The buffer is empty. Calculate full stats")
-            if len(updated_images) != project_info.items_count:
+            if len(updated_images) != project.items_count:
                 raise ValueError(
-                    f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project_info.items_count}) in the project."
+                    f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project."
                 )
         else:
             for stat in stats:
                 files = sly.fs.list_files(
-                    f"{g.STORAGE_DIR}/{stat.basename_stem}", [".npy"]
+                    f"{curr_projectfs_dir}/{stat.basename_stem}",
+                    [".npy"],
                 )
 
                 if len(files) != len(idx_to_infos.keys()):
                     sly.logger.warn(
-                        f"The number of images in the project has changed. Check chunks in Team Files: {g.STORAGE_DIR}/{stat.basename_stem}",
+                        f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}",
                     )
 
         tf_all_paths = [
             info.path
-            for info in g.api.file.list2(g.TEAM_ID, g.TF_STATS_DIR, recursive=True)
+            for info in g.api.file.list2(g.TEAM_ID, curr_teamfiles_dir, recursive=True)
         ]
 
         with tqdm(desc="Calculating stats", total=len(updated_images)) as pbar:
@@ -110,7 +116,7 @@ async def stats_endpoint(project_id: int):
                         pbar.update(1)
 
                     for stat in stats:
-                        savedir = f"{g.STORAGE_DIR}/{stat.basename_stem}"
+                        savedir = f"{curr_projectfs_dir}/{stat.basename_stem}"
                         os.makedirs(savedir, exist_ok=True)
 
                         tf_stat_chunks = [
@@ -131,7 +137,7 @@ async def stats_endpoint(project_id: int):
                                 latest_datetime
                                 > sorted(datetime_objects, reverse=True)[0]
                             ):
-                                g.TF_OLD_CHUNKS += [path for path in tf_stat_chunks]
+                                g.TF_OLD_CHUNKS += tf_stat_chunks
                                 for path in sly.fs.list_files(savedir, [".npy"]):
                                     if identifier in path:
                                         os.remove(path)
@@ -143,35 +149,53 @@ async def stats_endpoint(project_id: int):
                         stat.clean()
 
         for stat in stats:
-            stat.sew_chunks(chunks_dir=f"{g.STORAGE_DIR}/{stat.basename_stem}/")
-            with open(f"{g.STORAGE_DIR}/{stat.basename_stem}.json", "w") as f:
+            stat.sew_chunks(chunks_dir=f"{curr_projectfs_dir}/{stat.basename_stem}/")
+            with open(
+                f"{curr_projectfs_dir}/{stat.basename_stem}.json",
+                "w",
+            ) as f:
                 json.dump(stat.to_json(), f)
 
             npy_paths = sly.fs.list_files(
-                f"{g.STORAGE_DIR}/{stat.basename_stem}", valid_extensions=[".npy"]
+                f"{curr_projectfs_dir}/{stat.basename_stem}",
+                valid_extensions=[".npy"],
             )
             dst_npy_paths = [
-                f"{g.TF_STATS_DIR}/{stat.basename_stem}/{get_file_name_with_ext(path)}"
+                f"{curr_teamfiles_dir}/{stat.basename_stem}/{get_file_name_with_ext(path)}"
                 for path in npy_paths
             ]
 
             with tqdm(
                 desc=f"Uploading {stat.basename_stem} chunks",
                 total=sly.fs.get_directory_size(
-                    f"{g.STORAGE_DIR}/{stat.basename_stem}"
+                    f"{curr_projectfs_dir}/{stat.basename_stem}"
                 ),
                 unit="B",
                 unit_scale=True,
             ) as pbar:
                 g.api.file.upload_bulk(g.TEAM_ID, npy_paths, dst_npy_paths, pbar)
 
+            # emoji = "OK for" if  else "ERROR"
+            for dataset in datasets:
+                if math.ceil(dataset.items_count / g.BATCH_SIZE) < len(
+                    [
+                        path
+                        for path in npy_paths
+                        if f"_{dataset.id}_" in sly.fs.get_file_name(path)
+                    ]
+                ):
+                    raise ValueError(
+                        f"The number of chunks per stat ({len(npy_paths)}) not match with the total items count of the project ({project.items_count}) using following batch size: {g.BATCH_SIZE}"
+                    )
+
             sly.logger.info(
                 f"{stat.basename_stem} chunks: {len(npy_paths)} chunks succesfully uploaded"
             )
 
-        json_paths = sly.fs.list_files(f"{g.STORAGE_DIR}", valid_extensions=[".json"])
+        json_paths = sly.fs.list_files(curr_projectfs_dir, valid_extensions=[".json"])
         dst_json_paths = [
-            f"{g.TF_STATS_DIR}/{get_file_name_with_ext(path)}" for path in json_paths
+            f"{curr_teamfiles_dir}/{get_file_name_with_ext(path)}"
+            for path in json_paths
         ]
 
         if len(g.TF_OLD_CHUNKS) > 0:
@@ -197,4 +221,3 @@ async def stats_endpoint(project_id: int):
         sly.logger.info(
             f"{len(json_paths)} updated .json stats succesfully updated and uploaded"
         )
-        # sly.fs.remove_dir(g.STORAGE_DIR)
