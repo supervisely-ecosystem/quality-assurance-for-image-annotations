@@ -93,7 +93,7 @@ def pull_cache(tf_cache_dir: str):
                 g.META_CACHE = json.load(f)
         if "images_cache.json" in file:
             with open(file, "r") as f:
-                g.IMAGES_CACHE = json.load(f)[str(g.PROJECT_ID)]
+                g.IMAGES_CACHE = json.load(f).get(str(g.PROJECT_ID), {})
 
     g.META_CACHE = {
         int(k): sly.ProjectMeta().from_json(v) for k, v in g.META_CACHE.items()
