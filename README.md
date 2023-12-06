@@ -31,6 +31,8 @@ For the project you wish to obtain the statistics, do the following steps:
 
 **Step 3:** Wait while full stastics will be initially calculated. If it was already calculated, wait for the statstics update. (Promise - it won't take long 😊)
 
+The calculated statistics will appear in the `stats` folder in team files.
+
 ## Statistics Description
 
 **Class Balance:** Compare key properies of every class in the dataset.
