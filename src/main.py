@@ -42,7 +42,7 @@ def main():
     )
     for dataset in datasets:
         for path in files_fs:
-            if f"_{dataset.id}_{project_id}_{g.BATCH_SIZE}_" not in path:
+            if f"_{dataset.id}_{project_id}_{g.CHUNK_SIZE}_" not in path:
                 sly.logger.warn(
                     f"The old or junk chunk file detected and removed: '{path}'"
                 )
@@ -96,7 +96,7 @@ def main():
             ]
         )
 
-        if (len(unique_batch_sizes) > 1) or (g.BATCH_SIZE not in unique_batch_sizes):
+        if (len(unique_batch_sizes) > 1) or (g.CHUNK_SIZE not in unique_batch_sizes):
             g.TF_OLD_CHUNKS += [path for path in tf_all_paths if path.endswith(".npy")]
             sly.logger.info(
                 "Chunk batch sizes in team files are non-unique. The old chunks will be removed."
@@ -162,7 +162,7 @@ def main():
                                         os.remove(path)
 
                         np.save(
-                            f"{savedir}/{identifier}_{g.BATCH_SIZE}_{latest_datetime.isoformat()}.npy",
+                            f"{savedir}/{identifier}_{g.CHUNK_SIZE}_{latest_datetime.isoformat()}.npy",
                             stat.to_numpy_raw(),
                         )
                         stat.clean()
@@ -207,7 +207,7 @@ def main():
                 g.api.file.upload_bulk(g.TEAM_ID, npy_paths, dst_npy_paths, pbar)
 
             for dataset in datasets:
-                if math.ceil(dataset.items_count / g.BATCH_SIZE) < len(
+                if math.ceil(dataset.items_count / g.CHUNK_SIZE) < len(
                     [
                         path
                         for path in npy_paths
@@ -215,7 +215,7 @@ def main():
                     ]
                 ):
                     raise ValueError(
-                        f"The number of chunks per stat ({len(npy_paths)}) not match with the total items count of the project ({project.items_count}) using following batch size: {g.BATCH_SIZE}"
+                        f"The number of chunks per stat ({len(npy_paths)}) not match with the total items count of the project ({project.items_count}) using following batch size: {g.CHUNK_SIZE}"
                     )
 
             sly.logger.info(

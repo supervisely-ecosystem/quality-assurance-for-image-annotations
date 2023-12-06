@@ -66,7 +66,7 @@ def get_indexes_dct(project_id):
 
         idx_to_infos, infos_to_idx = {}, {}
 
-        for idx, image_batch in enumerate(sly.batched(images_all, g.BATCH_SIZE)):
+        for idx, image_batch in enumerate(sly.batched(images_all, g.CHUNK_SIZE)):
             identifier = f"chunk_{idx}_{dataset.id}_{project_id}"
             for image in image_batch:
                 infos_to_idx[image.id] = identifier
