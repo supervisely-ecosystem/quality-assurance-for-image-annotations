@@ -28,6 +28,7 @@ import src.globals as g
 
 def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMeta):
     updated_images = []
+    global images_flat
     images_flat = []
 
     for dataset in g.api.dataset.get_list(project_info.id):
@@ -38,7 +39,7 @@ def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMet
             project_meta.obj_classes
         ):
             sly.logger.warn(
-                "Changes in the number of classes detected. Recalculate full stats... #TODO"
+                "Changes in the number of classes detected. Recalculate full stats... "  # TODO
             )
             g.META_CACHE[project_info.id] = project_meta
             return images_flat
@@ -72,3 +73,50 @@ def get_indexes_dct(project_id):
             idx_to_infos[identifier] = image_batch
 
     return idx_to_infos, infos_to_idx
+
+
+def pull_cache(tf_cache_dir: str):
+    if not g.api.file.dir_exists(g.TEAM_ID, tf_cache_dir):
+        return
+
+    # files = g.api.file.list(g.TEAM_ID, tf_cache_dir, return_type="fileinfo")
+    local_dir = f"{g.STORAGE_DIR}/_cache"
+
+    shutil.rmtree(local_dir)
+    g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_dir)
+    files = sly.fs.list_files(local_dir, [".json"])
+
+    for file in files:
+        if "meta_cache.json" in file:
+            with open(file, "r") as f:
+                g.META_CACHE = json.load(f)
+        if "images_cache.json" in file:
+            with open(file, "r") as f:
+                g.IMAGES_CACHE = json.load(f)[str(g.PROJECT_ID)]
+
+    g.META_CACHE = {
+        int(k): sly.ProjectMeta().from_json(v) for k, v in g.META_CACHE.items()
+    }
+    g.IMAGES_CACHE = {int(k): sly.ImageInfo(*v) for k, v in g.IMAGES_CACHE.items()}
+
+    sly.logger.info("The cache was pulled from team files")
+
+
+def push_cache(tf_cache_dir: str):
+    global images_flat
+    local_cache_dir = f"{g.STORAGE_DIR}/_cache"
+    os.makedirs(local_cache_dir, exist_ok=True)
+
+    json_meta = {k: v.to_json() for k, v in g.META_CACHE.items()}
+
+    with open(f"{local_cache_dir}/meta_cache.json", "w") as f:
+        json.dump(json_meta, f)
+
+    with open(f"{local_cache_dir}/images_cache.json", "w") as f:
+        json.dump({g.PROJECT_ID: g.IMAGES_CACHE}, f)
+
+    g.api.file.upload_directory(
+        g.TEAM_ID, local_cache_dir, tf_cache_dir, replace_if_conflict=True
+    )
+
+    sly.logger.info("The cache was pushed to team files")

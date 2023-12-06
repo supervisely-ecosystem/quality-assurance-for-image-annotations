@@ -16,19 +16,6 @@ import src.globals as g
 import src.utils as u
 import supervisely as sly
 
-# from src.ui.input import card_1
-# from supervisely.app.widgets import Container
-
-# layout = Container(widgets=[card_1], direction="vertical")
-
-# static_dir = Path(g.STORAGE_DIR)
-# app = sly.Application(layout=layout, static_dir=static_dir)
-# server = app.get_server()
-
-
-# @server.get("/get-stats", response_class=Response)
-# async def stats_endpoint(project_id: int):
-
 
 def main():
     project_id = g.PROJECT_ID
@@ -219,7 +206,6 @@ def main():
             ) as pbar:
                 g.api.file.upload_bulk(g.TEAM_ID, npy_paths, dst_npy_paths, pbar)
 
-            # emoji = "OK for" if  else "ERROR"
             for dataset in datasets:
                 if math.ceil(dataset.items_count / g.BATCH_SIZE) < len(
                     [
@@ -256,4 +242,7 @@ def main():
 
 
 if __name__ == "__main__":
+    tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
+    u.pull_cache(tf_cache_dir)
     main()
+    u.push_cache(tf_cache_dir)
