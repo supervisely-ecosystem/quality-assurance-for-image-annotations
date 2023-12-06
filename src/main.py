@@ -49,7 +49,7 @@ def main():
 
     tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
     if sly.fs.dir_exists(g.STORAGE_DIR):
-        shutil.rmtree(g.STORAGE_DIR)
+        sly.fs.clean_dir(g.STORAGE_DIR)
     if g.api.file.dir_exists(g.TEAM_ID, tf_project_dir) is True:
         local_project_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
         os.makedirs(local_project_dir, exist_ok=True)

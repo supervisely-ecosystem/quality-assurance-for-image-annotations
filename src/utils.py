@@ -84,7 +84,7 @@ def pull_cache(tf_cache_dir: str):
     local_dir = f"{g.STORAGE_DIR}/_cache"
 
     if sly.fs.dir_exists(local_dir):
-        shutil.rmtree(local_dir)
+        sly.fs.clean_dir(local_dir)
     g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_dir)
     files = sly.fs.list_files(local_dir, [".json"])
 
