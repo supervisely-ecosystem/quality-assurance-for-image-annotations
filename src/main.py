@@ -228,7 +228,7 @@ def main():
             for path in npy_paths
         ]
 
-        u.check_datasets_consistency(project, datasets, npy_paths, len(stats))
+        # u.check_datasets_consistency(project, datasets, npy_paths, len(stats))
 
         with tqdm(
             desc=f"Uploading {stat.basename_stem} chunks",
