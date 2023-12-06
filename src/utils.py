@@ -28,6 +28,7 @@ import src.globals as g
 
 def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMeta):
     updated_images = []
+    global images_flat
     images_flat = []
 
     for dataset in g.api.dataset.get_list(project_info.id):
@@ -38,7 +39,7 @@ def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMet
             project_meta.obj_classes
         ):
             sly.logger.warn(
-                "Changes in the number of classes detected. Recalculate full stats... #TODO"
+                "Changes in the number of classes detected. Recalculate full stats... "  # TODO
             )
             g.META_CACHE[project_info.id] = project_meta
             return images_flat
@@ -65,7 +66,7 @@ def get_indexes_dct(project_id):
 
         idx_to_infos, infos_to_idx = {}, {}
 
-        for idx, image_batch in enumerate(sly.batched(images_all, g.BATCH_SIZE)):
+        for idx, image_batch in enumerate(sly.batched(images_all, g.CHUNK_SIZE)):
             identifier = f"chunk_{idx}_{dataset.id}_{project_id}"
             for image in image_batch:
                 infos_to_idx[image.id] = identifier
