@@ -15,18 +15,24 @@ from fastapi import Response, HTTPException
 import src.globals as g
 import src.utils as u
 import supervisely as sly
-from src.ui.input import card_1
-from supervisely.app.widgets import Container
 
-layout = Container(widgets=[card_1], direction="vertical")
+# from src.ui.input import card_1
+# from supervisely.app.widgets import Container
 
-static_dir = Path(g.STORAGE_DIR)
-app = sly.Application(layout=layout, static_dir=static_dir)
-server = app.get_server()
+# layout = Container(widgets=[card_1], direction="vertical")
+
+# static_dir = Path(g.STORAGE_DIR)
+# app = sly.Application(layout=layout, static_dir=static_dir)
+# server = app.get_server()
 
 
-@server.get("/get-stats", response_class=Response)
-async def stats_endpoint(project_id: int):
+# @server.get("/get-stats", response_class=Response)
+# async def stats_endpoint(project_id: int):
+
+
+def main():
+    project_id = g.PROJECT_ID
+
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
     project = g.api.project.get_info_by_id(project_id)
@@ -43,6 +49,17 @@ async def stats_endpoint(project_id: int):
 
     # with open(f"{g.STORAGE_DIR}/meta.json", "w") as f:
     #     json.dump(json_project_meta, f)
+
+    files_fs = sly.fs.list_files_recursively(
+        curr_projectfs_dir, valid_extensions=[".npy"]
+    )
+    for dataset in datasets:
+        for path in files_fs:
+            if f"_{dataset.id}_{project_id}_{g.BATCH_SIZE}_" not in path:
+                sly.logger.warn(
+                    f"The old or junk chunk file detected and removed: '{path}'"
+                )
+                os.remove(path)
 
     cache = {}
     stats = [
@@ -84,6 +101,20 @@ async def stats_endpoint(project_id: int):
             for info in g.api.file.list2(g.TEAM_ID, curr_teamfiles_dir, recursive=True)
         ]
 
+        unique_batch_sizes = set(
+            [
+                sly.fs.get_file_name(path).split("_")[-2]
+                for path in tf_all_paths
+                if path.endswith(".npy")
+            ]
+        )
+
+        if (len(unique_batch_sizes) > 1) or (g.BATCH_SIZE not in unique_batch_sizes):
+            g.TF_OLD_CHUNKS += [path for path in tf_all_paths if path.endswith(".npy")]
+            sly.logger.info(
+                "Chunk batch sizes in team files are non-unique. The old chunks will be removed."
+            )
+
         with tqdm(desc="Calculating stats", total=len(updated_images)) as pbar:
             for dataset in g.api.dataset.get_list(project_id):
                 images_upd = [
@@ -124,6 +155,7 @@ async def stats_endpoint(project_id: int):
                             for path in tf_all_paths
                             if (stat.basename_stem in path) and (identifier in path)
                         ]
+
                         if len(tf_stat_chunks) > 0:
                             timestamps = [
                                 sly.fs.get_file_name(path).split("_")[-1]
@@ -147,6 +179,18 @@ async def stats_endpoint(project_id: int):
                             stat.to_numpy_raw(),
                         )
                         stat.clean()
+
+        if len(g.TF_OLD_CHUNKS) > 0:
+            with tqdm(
+                desc=f"Deleting old chunks",
+                total=len(g.TF_OLD_CHUNKS),
+                unit="B",
+                unit_scale=True,
+            ) as pbar:
+                g.api.file.remove_batch(g.TEAM_ID, g.TF_OLD_CHUNKS, progress_cb=pbar)
+
+            sly.logger.info(f"{len(g.TF_OLD_CHUNKS)} old chunks succesfully deleted")
+            g.TF_OLD_CHUNKS = []
 
         for stat in stats:
             stat.sew_chunks(chunks_dir=f"{curr_projectfs_dir}/{stat.basename_stem}/")
@@ -198,18 +242,6 @@ async def stats_endpoint(project_id: int):
             for path in json_paths
         ]
 
-        if len(g.TF_OLD_CHUNKS) > 0:
-            with tqdm(
-                desc=f"Deleting old chunks",
-                total=len(g.TF_OLD_CHUNKS),
-                unit="B",
-                unit_scale=True,
-            ) as pbar:
-                g.api.file.remove_batch(g.TEAM_ID, g.TF_OLD_CHUNKS, progress_cb=pbar)
-
-            sly.logger.info(f"{len(g.TF_OLD_CHUNKS)} old chunks succesfully deleted")
-            g.TF_OLD_CHUNKS = []
-
         with tqdm(
             desc=f"Uploading .json stats",
             total=sum([sly.fs.get_file_size(path) for path in json_paths]),
@@ -221,3 +253,7 @@ async def stats_endpoint(project_id: int):
         sly.logger.info(
             f"{len(json_paths)} updated .json stats succesfully updated and uploaded"
         )
+
+
+if __name__ == "__main__":
+    main()

@@ -1,7 +1,7 @@
 <div align="center" markdown>
 <img src="poster placeholder"/>
 
-# Placeholder for app short description
+# On-the-fly Quality Assurance for Image Annotations
 
 <p align="center">
   <a href="#Overview">Overview</a> •
@@ -19,34 +19,15 @@
 
 ## Overview
 
-Section for app overview. Describe what the app does, what are the benefits of using it, what is the expected output, etc.
-
-## Preparation
-
-Section for app preparation. Describe what the user should do before running the app. For example, upload images to the team storage, create a project, etc.
+The app is claimed to unleash the full power of the [DatasetNinja.com](https://datasetninja.com) platform, allowing on-the-fly update of project statistics.
 
 ## How To Run
 
-Section for the app running. Describe how to run the app step by step.
+For the project you wish to obtain the statistics, do the following steps:
 
-**Step 1:** Describe actions in step.<br><br>
+**Step 1:** Click on the three-dot menu in the project card.<br><br>
 
-**Step 2:** Describe actions in step.<br><br>
+**Step 2:** Choose `Reports & Stats -> Quality Assurance`.<br><br>
+
+**Step 3:** Wait while full stastics will be initially calculated. If it was already calculated, wait for the statstics update. (Promise - it won't take long 😊)
 <img src="placeholder for screenshot"/><br><br>
-
-After finishing using the app, don't forget to stop the app session manually in the App Sessions. The app will write information about the text prompt and CLIP score to the image metadata. You can find this information in the Image Properties - Info section of the image in the labeling tool.
-
----
-
-_This section is about how to use the repo template, it should be removed from README.md after the app is ready to be released._<br>
-
-### How to use the repo template
-
-1. Clone the repo locally.
-2. Use the `create_venv.sh` script to create a virtual environment and install all required packages.
-3. Fill required fields in the `local.env` file (your IDs: team, workspace, etc.).
-4. Add the required code to the `src/globals.py` file.
-5. The template contains `src/ui/input.py` module, which has ready-to-work code if the app uses images projects or datasets. If you don't need it, you can replace it with your own code.
-6. The template also contains `src/ui/output.py` module, which has ready-to-work code for output, but it can be replaced with your own code.
-7. After implementing all required code and UI, fill in `config.json` file. If needed edit `requirements.txt` file.
-8. The repo is ready now.

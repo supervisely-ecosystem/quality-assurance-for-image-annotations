@@ -14,6 +14,7 @@ api = sly.Api.from_env()
 
 TEAM_ID = sly.env.team_id()
 WORKSPACE_ID = sly.env.workspace_id()
+PROJECT_ID = sly.env.project_id()
 
 
 STORAGE_DIR = sly.app.get_data_dir()
@@ -22,4 +23,4 @@ TF_STATS_DIR = "/stats"
 IMAGES_CACHE = {}
 META_CACHE = {}
 TF_OLD_CHUNKS = []
-BATCH_SIZE = 2
+BATCH_SIZE = 100
