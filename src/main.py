@@ -36,7 +36,7 @@ def main():
     updated_images = u.get_updated_images(project, project_meta)
 
     if len(updated_images) == 0:
-        sly.logger.info("Nothing to update. Skipping stats calculation...")
+        sly.logger.warn("Nothing to update. Skipping stats calculation...")
         return
 
     cache = {}
@@ -84,6 +84,8 @@ def main():
     files_fs = sly.fs.list_files_recursively(
         curr_projectfs_dir, valid_extensions=[".npy"]
     )
+    u.check_datasets_consistency(datasets, files_fs)
+
     for dataset in datasets:
         for path in files_fs:
             if f"_{dataset.id}_{project_id}_{g.CHUNK_SIZE}_" not in path:
@@ -223,6 +225,8 @@ def main():
             for path in npy_paths
         ]
 
+        u.check_datasets_consistency(datasets, npy_paths)
+
         with tqdm(
             desc=f"Uploading {stat.basename_stem} chunks",
             total=sly.fs.get_directory_size(
@@ -232,18 +236,6 @@ def main():
             unit_scale=True,
         ) as pbar:
             g.api.file.upload_bulk(g.TEAM_ID, npy_paths, dst_npy_paths, pbar)
-
-        for dataset in datasets:
-            if math.ceil(dataset.items_count / g.CHUNK_SIZE) < len(
-                [
-                    path
-                    for path in npy_paths
-                    if f"_{dataset.id}_" in sly.fs.get_file_name(path)
-                ]
-            ):
-                raise ValueError(
-                    f"The number of chunks per stat ({len(npy_paths)}) not match with the total items count of the project ({project.items_count}) using following batch size: {g.CHUNK_SIZE}"
-                )
 
         sly.logger.info(
             f"{stat.basename_stem} chunks: {len(npy_paths)} chunks succesfully uploaded"

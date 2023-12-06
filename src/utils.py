@@ -3,7 +3,7 @@ import os
 import random
 import re
 import shutil
-import time
+import time, math
 from typing import List, Literal, Optional
 
 import cv2
@@ -126,3 +126,17 @@ def push_cache(tf_cache_dir: str):
     )
 
     sly.logger.info("The cache was pushed to team files")
+
+
+def check_datasets_consistency(datasets, npy_paths):
+    for dataset in datasets:
+        if math.ceil(dataset.items_count / g.CHUNK_SIZE) < len(
+            [
+                path
+                for path in npy_paths
+                if f"_{dataset.id}_" in sly.fs.get_file_name(path)
+            ]
+        ):
+            raise ValueError(
+                f"The number of chunks per stat ({len(npy_paths)}) not match with the total items count of the project ({project.items_count}) using following batch size: {g.CHUNK_SIZE}"
+            )
