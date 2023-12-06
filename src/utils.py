@@ -56,6 +56,7 @@ def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMet
             updated_images.append(image)
             g.IMAGES_CACHE[image.id] = image
 
+    sly.logger.info(f"The changes in {len(updated_images)} images detected")
     return updated_images
 
 
