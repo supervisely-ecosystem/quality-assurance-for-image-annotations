@@ -24,15 +24,20 @@ def main():
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
     project = g.api.project.get_info_by_id(project_id)
+    project_stats = g.api.project.get_stats(project_id)
+    datasets = g.api.dataset.get_list(project_id)
+
+    sly.logger.info(f"Processing for the '{project.name}' with PROJECT_ID={project_id}")
+    sly.logger.info(f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
+    sly.logger.info(
+        f"The project consists of {project.items_count} images and has {len(datasets)} datasets"
+    )
 
     updated_images = u.get_updated_images(project, project_meta)
 
     if len(updated_images) == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
         return
-
-    project_stats = g.api.project.get_stats(project_id)
-    datasets = g.api.dataset.get_list(project_id)
 
     cache = {}
     stats = [
