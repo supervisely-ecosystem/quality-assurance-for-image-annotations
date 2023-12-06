@@ -66,7 +66,7 @@ def main():
         idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id)
 
         if sly.fs.dir_empty(curr_projectfs_dir):
-            sly.logger.info("The buffer is empty. Calculate full stats")
+            sly.logger.warn("The buffer is empty. Calculate full stats")
             if len(updated_images) != project.items_count:
                 raise ValueError(
                     f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project."
