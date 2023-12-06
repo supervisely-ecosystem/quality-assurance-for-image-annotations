@@ -26,13 +26,16 @@ from dataset_tools.text.generate_summary import list2sentence
 import src.globals as g
 
 
-def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMeta):
-    updated_images = []
-    global images_flat
+def get_images_flat(project_info):
     images_flat = []
-
     for dataset in g.api.dataset.get_list(project_info.id):
         images_flat += g.api.image.get_list(dataset.id)
+    return images_flat
+
+
+def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMeta):
+    updated_images = []
+    images_flat = get_images_flat(project_info)
 
     if g.META_CACHE.get(project_info.id) is not None:
         if len(g.META_CACHE[project_info.id].obj_classes) != len(
@@ -105,7 +108,6 @@ def pull_cache(tf_cache_dir: str):
 
 
 def push_cache(tf_cache_dir: str):
-    global images_flat
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     os.makedirs(local_cache_dir, exist_ok=True)
 
@@ -128,15 +130,21 @@ def push_cache(tf_cache_dir: str):
     sly.logger.info("The cache was pushed to team files")
 
 
-def check_datasets_consistency(datasets, npy_paths):
+def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
     for dataset in datasets:
-        if math.ceil(dataset.items_count / g.CHUNK_SIZE) < len(
-            [
-                path
-                for path in npy_paths
-                if f"_{dataset.id}_" in sly.fs.get_file_name(path)
-            ]
-        ):
-            raise ValueError(
-                f"The number of chunks per stat ({len(npy_paths)}) not match with the total items count of the project ({project.items_count}) using following batch size: {g.CHUNK_SIZE}"
+        actual_ceil = math.ceil(dataset.items_count / g.CHUNK_SIZE)
+        max_chunks = math.ceil(
+            len(
+                [
+                    path
+                    for path in npy_paths
+                    if f"_{dataset.id}_" in sly.fs.get_file_name(path)
+                ]
             )
+            / num_stats
+        )
+        if actual_ceil < max_chunks:
+            raise ValueError(
+                f"The number of chunks per stat ({len(npy_paths)}) not match with the total items count of the project ({project_info.items_count}) using following batch size: {g.CHUNK_SIZE}. Details: DATASET_ID={dataset.id}; actual num of chunks: {actual_ceil}; max num of chunks: {max_chunks}"
+            )
+    sly.logger.info("The consistency of data is OK")

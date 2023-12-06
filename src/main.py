@@ -62,7 +62,7 @@ def main():
         total_size = sum(
             [
                 g.api.file.get_directory_size(
-                    g.TEAM_ID, f"{curr_tf_project_dir}/{stat.basename_stem}"
+                    g.TEAM_ID, f"{curr_tf_project_dir}/{stat.basename_stem}/"
                 )
                 for stat in stats
             ]
@@ -84,24 +84,27 @@ def main():
     files_fs = sly.fs.list_files_recursively(
         curr_projectfs_dir, valid_extensions=[".npy"]
     )
-    u.check_datasets_consistency(datasets, files_fs)
+    u.check_datasets_consistency(project, datasets, files_fs, len(stats))
 
-    for dataset in datasets:
-        for path in files_fs:
-            if f"_{dataset.id}_{project_id}_{g.CHUNK_SIZE}_" not in path:
-                sly.logger.warn(
-                    f"The old or junk chunk file detected and removed: '{path}'"
-                )
-                os.remove(path)
+    ds_ids = [str(dataset.id) for dataset in datasets]
+    for path in files_fs:
+        if f"_{project_id}_{g.CHUNK_SIZE}_" not in path:
+            sly.logger.warn(
+                f"The old or junk chunk file detected and removed: '{path}'"
+            )
+            os.remove(path)
+        elif path.split("_")[-4] not in ds_ids:
+            os.remove(path)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id)
 
     if sly.fs.dir_empty(curr_projectfs_dir):
         sly.logger.warn("The buffer is empty. Calculate full stats")
         if len(updated_images) != project.items_count:
-            raise ValueError(
-                f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project."
+            sly.logger.warn(
+                f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
             )
+            updated_images = u.get_images_flat(project)
     else:
         for stat in stats:
             files = sly.fs.list_files(
@@ -225,7 +228,7 @@ def main():
             for path in npy_paths
         ]
 
-        u.check_datasets_consistency(datasets, npy_paths)
+        u.check_datasets_consistency(project, datasets, npy_paths, len(stats))
 
         with tqdm(
             desc=f"Uploading {stat.basename_stem} chunks",
