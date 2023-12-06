@@ -60,11 +60,11 @@ def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMet
 
 
 def get_indexes_dct(project_id):
+    idx_to_infos, infos_to_idx = {}, {}
+
     for dataset in g.api.dataset.get_list(project_id):
         images_all = g.api.image.get_list(dataset.id)
         images_all = sorted(images_all, key=lambda x: x.id)
-
-        idx_to_infos, infos_to_idx = {}, {}
 
         for idx, image_batch in enumerate(sly.batched(images_all, g.CHUNK_SIZE)):
             identifier = f"chunk_{idx}_{dataset.id}_{project_id}"
