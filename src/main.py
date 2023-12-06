@@ -2,6 +2,7 @@ from datetime import datetime
 import json, os
 import numpy as np
 import math
+import shutil
 import src.globals as g
 import src.utils as u
 import supervisely as sly
@@ -29,25 +30,6 @@ def main():
     project_stats = g.api.project.get_stats(project_id)
     datasets = g.api.dataset.get_list(project_id)
 
-    curr_projectfs_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
-    os.makedirs(curr_projectfs_dir, exist_ok=True)
-
-    curr_teamfiles_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
-
-    # with open(f"{g.STORAGE_DIR}/meta.json", "w") as f:
-    #     json.dump(json_project_meta, f)
-
-    files_fs = sly.fs.list_files_recursively(
-        curr_projectfs_dir, valid_extensions=[".npy"]
-    )
-    for dataset in datasets:
-        for path in files_fs:
-            if f"_{dataset.id}_{project_id}_{g.CHUNK_SIZE}_" not in path:
-                sly.logger.warn(
-                    f"The old or junk chunk file detected and removed: '{path}'"
-                )
-                os.remove(path)
-
     cache = {}
     stats = [
         dtools.ClassBalance(project_meta, project_stats, stat_cache=cache),
@@ -59,6 +41,50 @@ def main():
         dtools.ClassesTreemap(project_meta),
         # dtools.AnomalyReport(),  # ?
     ]
+
+    curr_projectfs_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
+    os.makedirs(curr_projectfs_dir, exist_ok=True)
+
+    curr_teamfiles_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
+
+    tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
+    if sly.fs.dir_exists(g.STORAGE_DIR):
+        shutil.rmtree(g.STORAGE_DIR)
+    if g.api.file.dir_exists(g.TEAM_ID, tf_project_dir) is True:
+        local_project_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
+        os.makedirs(local_project_dir, exist_ok=True)
+        total_size = sum(
+            [
+                g.api.file.get_directory_size(
+                    g.TEAM_ID, f"{tf_project_dir}/{stat.basename_stem}"
+                )
+                for stat in stats
+            ]
+        )
+        with tqdm(
+            desc=f"Downloading chunks to buffer",
+            total=total_size,
+            unit="B",
+            unit_scale=True,
+        ) as pbar:
+            for stat in stats:
+                g.api.file.download_directory(
+                    g.TEAM_ID,
+                    f"{tf_project_dir}/{stat.basename_stem}",
+                    f"{local_project_dir}/{stat.basename_stem}",
+                    pbar,
+                )
+
+    files_fs = sly.fs.list_files_recursively(
+        curr_projectfs_dir, valid_extensions=[".npy"]
+    )
+    for dataset in datasets:
+        for path in files_fs:
+            if f"_{dataset.id}_{project_id}_{g.CHUNK_SIZE}_" not in path:
+                sly.logger.warn(
+                    f"The old or junk chunk file detected and removed: '{path}'"
+                )
+                os.remove(path)
 
     if len(updated_images) == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
