@@ -118,7 +118,11 @@ def push_cache(tf_cache_dir: str):
         json.dump({g.PROJECT_ID: g.IMAGES_CACHE}, f)
 
     g.api.file.upload_directory(
-        g.TEAM_ID, local_cache_dir, tf_cache_dir, replace_if_conflict=True
+        g.TEAM_ID,
+        local_cache_dir,
+        tf_cache_dir,
+        change_name_if_conflict=False,
+        replace_if_conflict=True,
     )
 
     sly.logger.info("The cache was pushed to team files")
