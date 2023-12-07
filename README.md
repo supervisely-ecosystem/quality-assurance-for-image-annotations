@@ -27,7 +27,7 @@ For the project you wish to obtain the statistics, do the following steps:
 
 **Step 1:** Click on the three-dot menu in the project card.<br><br>
 
-**Step 2:** Choose `Reports & Stats -> Quality Assurance`.<br><br>
+**Step 2:** Choose `Reports & Stats -> On-the-fly Quality Assurance for Image Annotations`.<br><br>
 
 **Step 3:** Wait while full stastics will be initially calculated. If it was already calculated, wait for the statstics update. (Promise - it won't take long 😊)
 
