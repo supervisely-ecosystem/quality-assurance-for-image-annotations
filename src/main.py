@@ -1,17 +1,19 @@
 from datetime import datetime
 import json, os
 import numpy as np
-import math
-import shutil
 import src.globals as g
 import src.utils as u
 import supervisely as sly
 from tqdm import tqdm
 import dataset_tools as dtools
-from supervisely.io.fs import get_file_name_with_ext
-from pathlib import Path
+from supervisely.io.fs import (
+    get_file_name_with_ext,
+    get_file_name,
+    list_files,
+    get_file_size,
+    list_files_recursively,
+)
 
-from fastapi import Response, HTTPException
 
 import src.globals as g
 import src.utils as u
@@ -27,7 +29,8 @@ def main():
     project_stats = g.api.project.get_stats(project_id)
     datasets = g.api.dataset.get_list(project_id)
 
-    sly.logger.info(f"Processing for the '{project.name}' with PROJECT_ID={project_id}")
+    sly.logger.info(f"Processing for the '{project.name}' project")
+    sly.logger.info(f"with the PROJECT_ID={project_id}")
     sly.logger.info(f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
     sly.logger.info(
         f"The project consists of {project.items_count} images and has {len(datasets)} datasets"
@@ -81,60 +84,34 @@ def main():
                     pbar,
                 )
 
-    files_fs = sly.fs.list_files_recursively(
-        curr_projectfs_dir, valid_extensions=[".npy"]
-    )
+    files_fs = list_files_recursively(curr_projectfs_dir, valid_extensions=[".npy"])
     u.check_datasets_consistency(project, datasets, files_fs, len(stats))
-
-    ds_ids = [str(dataset.id) for dataset in datasets]
-    for path in files_fs:
-        if f"_{project_id}_{g.CHUNK_SIZE}_" not in path:
-            sly.logger.warn(
-                f"The old or junk chunk file detected and removed: '{path}'"
-            )
-            os.remove(path)
-        elif path.split("_")[-4] not in ds_ids:
-            os.remove(path)
+    u.remove_junk(project, datasets, files_fs)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id)
 
-    if sly.fs.dir_empty(curr_projectfs_dir):
-        sly.logger.warn("The buffer is empty. Calculate full stats")
-        if len(updated_images) != project.items_count:
-            sly.logger.warn(
-                f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
-            )
-            updated_images = u.get_images_flat(project)
-    else:
-        for stat in stats:
-            files = sly.fs.list_files(
-                f"{curr_projectfs_dir}/{stat.basename_stem}",
-                [".npy"],
-            )
-
-            if len(files) != len(idx_to_infos.keys()):
-                sly.logger.warn(
-                    f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}",
-                )
+    u.check_idxs_integrity(
+        project, stats, curr_projectfs_dir, idx_to_infos, updated_images
+    )
 
     tf_all_paths = [
         info.path
         for info in g.api.file.list2(g.TEAM_ID, curr_tf_project_dir, recursive=True)
     ]
 
-    unique_batch_sizes = set(
-        [
-            sly.fs.get_file_name(path).split("_")[-2]
-            for path in tf_all_paths
-            if path.endswith(".npy")
-        ]
-    )
+    # unique_batch_sizes = set(
+    #     [
+    #         get_file_name(path).split("_")[-2]
+    #         for path in tf_all_paths
+    #         if path.endswith(".npy")
+    #     ]
+    # )
 
-    if (len(unique_batch_sizes) > 1) or (str(g.CHUNK_SIZE) not in unique_batch_sizes):
-        g.TF_OLD_CHUNKS += [path for path in tf_all_paths if path.endswith(".npy")]
-        sly.logger.info(
-            "Chunk batch sizes in team files are non-unique. All chunks will be removed."
-        )
+    # if (len(unique_batch_sizes) > 1) or (str(g.CHUNK_SIZE) not in unique_batch_sizes):
+    #     g.TF_OLD_CHUNKS += [path for path in tf_all_paths if path.endswith(".npy")]
+    #     sly.logger.info(
+    #         "Chunk batch sizes in team files are non-unique. All chunks will be removed."
+    #     )
 
     sly.logger.info(f"Start calculating stats for {len(updated_images)} images")
     with tqdm(desc="Calculating stats", total=len(updated_images)) as pbar:
@@ -142,9 +119,6 @@ def main():
             images_upd = [
                 image for image in updated_images if image.dataset_id == dataset.id
             ]
-
-            pass
-
             idx_upd = list(set([infos_to_idx[image.id] for image in images_upd]))
 
             for identifier in idx_upd:
@@ -165,7 +139,6 @@ def main():
                 for img, ann in zip(batch, anns):
                     for stat in stats:
                         stat.update(img, ann)
-
                     pbar.update(1)
 
                 for stat in stats:
@@ -180,7 +153,7 @@ def main():
 
                     if len(tf_stat_chunks) > 0:
                         timestamps = [
-                            sly.fs.get_file_name(path).split("_")[-1]
+                            get_file_name(path).split("_")[-1]
                             for path in tf_stat_chunks
                         ]
                         datetime_objects = [
@@ -189,7 +162,7 @@ def main():
                         ]
                         if latest_datetime > sorted(datetime_objects, reverse=True)[0]:
                             g.TF_OLD_CHUNKS += tf_stat_chunks
-                            for path in sly.fs.list_files(savedir, [".npy"]):
+                            for path in list_files(savedir, [".npy"]):
                                 if identifier in path:
                                     os.remove(path)
 
@@ -201,7 +174,7 @@ def main():
 
     if len(g.TF_OLD_CHUNKS) > 0:
         with tqdm(
-            desc=f"Deleting old chunks",
+            desc=f"Deleting old chunks in team files",
             total=len(g.TF_OLD_CHUNKS),
             unit="B",
             unit_scale=True,
@@ -213,22 +186,16 @@ def main():
 
     for stat in stats:
         stat.sew_chunks(chunks_dir=f"{curr_projectfs_dir}/{stat.basename_stem}/")
-        with open(
-            f"{curr_projectfs_dir}/{stat.basename_stem}.json",
-            "w",
-        ) as f:
+        with open(f"{curr_projectfs_dir}/{stat.basename_stem}.json", "w") as f:
             json.dump(stat.to_json(), f)
 
-        npy_paths = sly.fs.list_files(
-            f"{curr_projectfs_dir}/{stat.basename_stem}",
-            valid_extensions=[".npy"],
+        npy_paths = list_files(
+            f"{curr_projectfs_dir}/{stat.basename_stem}", valid_extensions=[".npy"]
         )
         dst_npy_paths = [
             f"{curr_tf_project_dir}/{stat.basename_stem}/{get_file_name_with_ext(path)}"
             for path in npy_paths
         ]
-
-        # u.check_datasets_consistency(project, datasets, npy_paths, len(stats))
 
         with tqdm(
             desc=f"Uploading {stat.basename_stem} chunks",
@@ -241,17 +208,17 @@ def main():
             g.api.file.upload_bulk(g.TEAM_ID, npy_paths, dst_npy_paths, pbar)
 
         sly.logger.info(
-            f"{stat.basename_stem} chunks: {len(npy_paths)} chunks succesfully uploaded"
+            f"{stat.basename_stem}: {len(npy_paths)} chunks succesfully uploaded"
         )
 
-    json_paths = sly.fs.list_files(curr_projectfs_dir, valid_extensions=[".json"])
+    json_paths = list_files(curr_projectfs_dir, valid_extensions=[".json"])
     dst_json_paths = [
         f"{curr_tf_project_dir}/{get_file_name_with_ext(path)}" for path in json_paths
     ]
 
     with tqdm(
         desc=f"Uploading .json stats",
-        total=sum([sly.fs.get_file_size(path) for path in json_paths]),
+        total=sum([get_file_size(path) for path in json_paths]),
         unit="B",
         unit_scale=True,
     ) as pbar:

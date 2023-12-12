@@ -33,6 +33,16 @@ For the project you wish to obtain the statistics, do the following steps:
 
 The calculated statistics will appear in the `stats` folder in team files.
 
+## Chunks file structure
+
+Every generated chunk has the universal description:
+
+```
+chunk_<chunk-index>_<dataset-id>_<project-id>_<chunk-size-images-per-batch>_<most-recent_updated_image>.npy
+```
+
+Be careful: the chunks' number of indexes is **derived from the number of images in a dataset**
+
 ## Statistics Description
 
 **Class Balance:** Compare key properies of every class in the dataset.
@@ -84,3 +94,4 @@ Columns:
 * `Width px` - Width of the object in pixels.
 * `Width %` - Width (%) of the object relative to the height of the image.
 * `Area %` - Relative object area (%).
+
