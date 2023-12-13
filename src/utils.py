@@ -14,20 +14,19 @@ def get_project_images_all(project_info):
     return images_flat
 
 
-def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMeta):
+def get_updated_images(project: sly.ImageInfo, project_meta: sly.ProjectMeta):
     updated_images = []
-    images_flat = get_project_images_all(project_info)
+    images_flat = get_project_images_all(project)
 
-    if g.META_CACHE.get(project_info.id) is not None:
-        if len(g.META_CACHE[project_info.id].obj_classes) != len(
-            project_meta.obj_classes
-        ):
+    if g.META_CACHE.get(project.id) is not None:
+        if len(g.META_CACHE[project.id].obj_classes) != len(project_meta.obj_classes):
             sly.logger.warn(
                 "Changes in the number of classes detected. Recalculate full stats... "  # TODO
             )
-            g.META_CACHE[project_info.id] = project_meta
+            g.META_CACHE[project.id] = project_meta.to_json()
             return images_flat
-    g.META_CACHE[project_info.id] = project_meta
+
+    g.META_CACHE[project.id] = project_meta.to_json()
 
     for image in images_flat:
         try:
@@ -40,7 +39,15 @@ def get_updated_images(project_info: sly.ImageInfo, project_meta: sly.ProjectMet
             updated_images.append(image)
             g.IMAGES_CACHE[image.id] = image.updated_at
 
-    if len(updated_images) == project_info.items_count:
+    set_A, set_B = set(g.IMAGES_CACHE), set([image.id for image in images_flat])
+    if set_A != set_B:
+        sly.logger.warn(
+            f"The add/delete operation was detected in the images with the following ids: {set_A.symmetric_difference(set_B)}"
+        )
+        sly.logger.info("Recalculate full statistics")
+        return images_flat
+
+    if len(updated_images) == project.items_count:
         sly.logger.info(f"Full dataset statistics will be calculated.")
     elif len(updated_images) > 0:
         sly.logger.info(f"The changes in {len(updated_images)} images detected")
@@ -97,10 +104,8 @@ def push_cache(tf_cache_dir: str):
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     os.makedirs(local_cache_dir, exist_ok=True)
 
-    json_meta = {k: v.to_json() for k, v in g.META_CACHE.items()}
-
     with open(f"{local_cache_dir}/meta_cache.json", "w") as f:
-        json.dump(json_meta, f)
+        json.dump(g.META_CACHE, f)
     with open(f"{local_cache_dir}/images_cache.json", "w") as f:
         json.dump({g.PROJECT_ID: g.IMAGES_CACHE}, f)
 
