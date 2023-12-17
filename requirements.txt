@@ -3,3 +3,5 @@ git+https://github.com/supervisely/dataset-tools.git@quality-app
 
 # code formatter
 black
+
+#  "system", "statistics", "visualization stats"
