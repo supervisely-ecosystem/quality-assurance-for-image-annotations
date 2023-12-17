@@ -36,7 +36,7 @@ def main():
         f"The project consists of {project.items_count} images and has {len(datasets)} datasets"
     )
 
-    updated_images = u.get_updated_images(project, project_meta)
+    updated_images, updated_classes = u.get_updated_images(project, project_meta)
 
     if len(updated_images) == 0:
         sly.logger.warn("Nothing to update. Skipping stats calculation...")
@@ -45,12 +45,12 @@ def main():
     cache = {}
     stats = [
         dtools.ClassBalance(project_meta, project_stats, stat_cache=cache),
-        dtools.ClassCooccurrence(project_meta),
-        dtools.ClassesPerImage(project_meta, project_stats, datasets, stat_cache=cache),
-        dtools.ObjectsDistribution(project_meta),
-        dtools.ObjectSizes(project_meta, project_stats),
-        dtools.ClassSizes(project_meta),
-        dtools.ClassesTreemap(project_meta),
+        # dtools.ClassCooccurrence(project_meta),
+        # dtools.ClassesPerImage(project_meta, project_stats, datasets, stat_cache=cache),
+        # dtools.ObjectsDistribution(project_meta),
+        # dtools.ObjectSizes(project_meta, project_stats),
+        # dtools.ClassSizes(project_meta),
+        # dtools.ClassesTreemap(project_meta),
         # dtools.AnomalyReport(),  # ?
     ]
 
@@ -185,7 +185,7 @@ def main():
         g.TF_OLD_CHUNKS = []
 
     for stat in stats:
-        stat.sew_chunks(chunks_dir=f"{curr_projectfs_dir}/{stat.basename_stem}/")
+        stat.sew_chunks(f"{curr_projectfs_dir}/{stat.basename_stem}/", updated_classes)
         with open(f"{curr_projectfs_dir}/{stat.basename_stem}.json", "w") as f:
             json.dump(stat.to_json(), f)
 

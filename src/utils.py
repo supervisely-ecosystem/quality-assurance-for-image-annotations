@@ -15,16 +15,22 @@ def get_project_images_all(project_info):
 
 
 def get_updated_images(project: sly.ImageInfo, project_meta: sly.ProjectMeta):
-    updated_images = []
+    updated_images, updated_classes = [], []
     images_flat = get_project_images_all(project)
 
     if g.META_CACHE.get(project.id) is not None:
-        if len(g.META_CACHE[project.id].obj_classes) != len(project_meta.obj_classes):
+        cls_names = set([obj.name for obj in project_meta.obj_classes])
+        cls_names_cached = set(
+            [obj["title"] for obj in g.META_CACHE[project.id]["classes"]]
+        )
+        if cls_names_cached != cls_names:
+            updated_classes = cls_names.symmetric_difference(cls_names_cached)
             sly.logger.warn(
-                "Changes in the number of classes detected. Recalculate full stats... "  # TODO
-            )
-            g.META_CACHE[project.id] = project_meta.to_json()
-            return images_flat
+                f"The following project's classes were added/deleted: {updated_classes}"
+            )  # TODO
+            # cls_names
+            # g.META_CACHE[project.id] = project_meta.to_json()
+            # return images_flat
 
     g.META_CACHE[project.id] = project_meta.to_json()
 
@@ -51,7 +57,7 @@ def get_updated_images(project: sly.ImageInfo, project_meta: sly.ProjectMeta):
         sly.logger.info(f"Full dataset statistics will be calculated.")
     elif len(updated_images) > 0:
         sly.logger.info(f"The changes in {len(updated_images)} images detected")
-    return updated_images
+    return updated_images, list(updated_classes)
 
 
 def get_indexes_dct(project_id):
@@ -84,10 +90,7 @@ def pull_cache(tf_cache_dir: str):
     for file in files:
         if "meta_cache.json" in file:
             with open(file, "r") as f:
-                g.META_CACHE = {
-                    int(k): sly.ProjectMeta().from_json(v)
-                    for k, v in json.load(f).items()
-                }
+                g.META_CACHE = {int(k): v for k, v in json.load(f).items()}
         if "images_cache.json" in file:
             with open(file, "r") as f:
                 g.IMAGES_CACHE = {
