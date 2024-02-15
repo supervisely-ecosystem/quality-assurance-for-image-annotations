@@ -33,6 +33,8 @@ server = app.get_server()
 
 @server.get("/get-stats", response_class=Response)
 async def stats_endpoint(project_id: int):
+    tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
+    u.pull_cache(tf_cache_dir)
 
     project_id = g.PROJECT_ID
 
@@ -240,6 +242,7 @@ async def stats_endpoint(project_id: int):
     sly.logger.info(
         f"{len(json_paths)} updated .json stats succesfully updated and uploaded"
     )
+    u.push_cache(tf_cache_dir)
 
 
 # if __name__ == "__main__":
