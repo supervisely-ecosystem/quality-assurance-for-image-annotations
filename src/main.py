@@ -20,7 +20,9 @@ import src.utils as u
 import supervisely as sly
 
 
-def main():
+@server.get("/get-stats", response_class=Response)
+async def stats_endpoint(project_id: int):
+
     project_id = g.PROJECT_ID
 
     json_project_meta = g.api.project.get_meta(project_id)
@@ -229,8 +231,8 @@ def main():
     )
 
 
-if __name__ == "__main__":
-    tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
-    u.pull_cache(tf_cache_dir)
-    main()
-    u.push_cache(tf_cache_dir)
+# if __name__ == "__main__":
+#     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
+#     u.pull_cache(tf_cache_dir)
+#     main()
+#     u.push_cache(tf_cache_dir)
