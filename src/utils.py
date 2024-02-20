@@ -34,23 +34,23 @@ def get_updated_images(project: sly.ImageInfo, project_meta: sly.ProjectMeta):
             sly.logger.warn(
                 "Changes in the number of classes detected. Recalculate full stats... "  # TODO
             )
-            g.META_CACHE[project.id] = project_meta.to_json()
+            g.META_CACHE[project.id] = project_meta  # .to_json()
             return images_flat
 
-    g.META_CACHE[project.id] = project_meta.to_json()
+    g.META_CACHE[project.id] = project_meta  # .to_json()
 
     for image in images_flat:
         try:
             image: sly.ImageInfo
-            cached_updated_at = g.IMAGES_CACHE[image.id]
+            cached_updated_at = g.PROJ_IMAGES_CACHE[image.id]
             if image.updated_at != cached_updated_at:
                 updated_images.append(image)
-                g.IMAGES_CACHE[image.id] = image.updated_at
+                g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
         except KeyError:
             updated_images.append(image)
-            g.IMAGES_CACHE[image.id] = image.updated_at
+            g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
 
-    set_A, set_B = set(g.IMAGES_CACHE), set([image.id for image in images_flat])
+    set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([image.id for image in images_flat])
     if set_A != set_B:
         sly.logger.warn(
             f"The add/delete operation was detected in the images with the following ids: {set_A.symmetric_difference(set_B)}"
@@ -101,11 +101,10 @@ def pull_cache(tf_cache_dir: str):
                 }
         if "images_cache.json" in file:
             with open(file, "r", encoding="utf-8") as f:
-                g.IMAGES_CACHE = {
+                g.IMAGES_CACHE = json.load(f)
+                g.PROJ_IMAGES_CACHE = {
                     int(k): v
-                    for k, v in json.load(f)
-                    .get(str(g.PROJECT_ID), g.IMAGES_CACHE)
-                    .items()
+                    for k, v in g.IMAGES_CACHE.get(str(g.PROJECT_ID), {}).items()
                 }
 
     sly.logger.info("The cache was pulled from team files")
@@ -115,10 +114,14 @@ def push_cache(tf_cache_dir: str):
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     os.makedirs(local_cache_dir, exist_ok=True)
 
+    jcache = {k: v.to_json() for k, v in g.META_CACHE.items()}
     with open(f"{local_cache_dir}/meta_cache.json", "w", encoding="utf-8") as f:
-        json.dump(g.META_CACHE, f)
+        json.dump(jcache, f)
+
     with open(f"{local_cache_dir}/images_cache.json", "w", encoding="utf-8") as f:
-        json.dump({g.PROJECT_ID: g.IMAGES_CACHE}, f)
+        tmp = {str(k): v for k, v in g.PROJ_IMAGES_CACHE.items()}
+        g.IMAGES_CACHE.update({str(g.PROJECT_ID): tmp})
+        json.dump(g.IMAGES_CACHE, f)
 
     g.api.file.upload_directory(
         g.TEAM_ID,
