@@ -87,7 +87,7 @@ def get_project_images_all(project_info: ProjectInfo) -> List[ImageInfo]:
 
 
 def get_updated_images(
-    project: ImageInfo, project_meta: ProjectMeta
+    project: ProjectInfo, project_meta: ProjectMeta
 ) -> List[ImageInfo]:
     updated_images = []
     images_flat = get_project_images_all(project)
@@ -346,6 +346,7 @@ def sew_chunks_to_stats_and_upload_chunks(
 
 
 def upload_sewed_stats(curr_projectfs_dir, curr_tf_project_dir):
+    remove_files_with_null(curr_projectfs_dir)
     json_paths = list_files(curr_projectfs_dir, valid_extensions=[".json"])
     dst_json_paths = [
         f"{curr_tf_project_dir}/{get_file_name_with_ext(path)}" for path in json_paths
@@ -362,3 +363,18 @@ def upload_sewed_stats(curr_projectfs_dir, curr_tf_project_dir):
     sly.logger.info(
         f"{len(json_paths)} updated .json stats succesfully updated and uploaded"
     )
+
+
+def remove_files_with_null(directory_path: str):
+    for filename in os.listdir(directory_path):
+        if filename.endswith(".json"):
+            file_path = os.path.join(directory_path, filename)
+
+            with open(file_path, "r") as file:
+                try:
+                    json_data = json.load(file)
+                    if json_data is None:
+                        os.remove(file_path)
+                        print(f"Removed {filename} as it contains null values.")
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON in {filename}.")
