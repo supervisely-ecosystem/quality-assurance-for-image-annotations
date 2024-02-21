@@ -87,9 +87,13 @@ def get_project_images_all(project_info: ProjectInfo) -> List[ImageInfo]:
 
 
 def get_updated_images(
-    project: ProjectInfo, project_meta: ProjectMeta
+    project: ProjectInfo, project_meta: ProjectMeta, project_stats: dict
 ) -> List[ImageInfo]:
     updated_images = []
+    if project_stats["images"]["total"]["imagesMarked"] == 0:
+        sly.logger.info("The project is fully unlabeled")
+        return updated_images
+
     images_flat = get_project_images_all(project)
 
     if g.META_CACHE.get(project.id) is not None:

@@ -50,7 +50,7 @@ async def stats_endpoint(response: Response, project_id: int):
         f"The project consists of {project.items_count} images and has {len(datasets)} datasets"
     )
 
-    updated_images = u.get_updated_images(project, project_meta)
+    updated_images = u.get_updated_images(project, project_meta, project_stats)
 
     if len(updated_images) == 0:
         sly.logger.warn("Nothing to update. Skipping stats calculation...")
