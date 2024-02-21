@@ -15,11 +15,10 @@ from supervisely.io.fs import (
 )
 
 from pathlib import Path
-
 import src.globals as g
 import src.utils as u
 import supervisely as sly
-from fastapi import Response, HTTPException
+from fastapi import Response, HTTPException, status
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
 
@@ -32,13 +31,11 @@ server = app.get_server()
 
 
 @server.get("/get-stats", response_class=Response)
-async def stats_endpoint(project_id: int):
+async def stats_endpoint(response: Response, project_id: int):
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
-    g.PROJECT_ID = project_id
 
-    u.pull_cache(tf_cache_dir)
-
-    # project_id = g.PROJECT_ID
+    g.initialize_global_cache()
+    u.pull_cache(project_id, tf_cache_dir)
 
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
@@ -57,7 +54,9 @@ async def stats_endpoint(project_id: int):
 
     if len(updated_images) == 0:
         sly.logger.warn("Nothing to update. Skipping stats calculation...")
-        return "Nothing to update. Skipping stats calculation..."
+        response.status_code = status.HTTP_200_OK
+        response.body = b"Nothing to update. Skipping stats calculation..."
+        return response
 
     cache = {}
     stats = [
@@ -83,8 +82,7 @@ async def stats_endpoint(project_id: int):
     u.check_datasets_consistency(project, datasets, files_fs, len(stats))
     u.remove_junk(project, datasets, files_fs)
 
-    idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id)
-
+    idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
     u.check_idxs_integrity(
         project, stats, curr_projectfs_dir, idx_to_infos, updated_images
     )
@@ -110,7 +108,7 @@ async def stats_endpoint(project_id: int):
 
     sly.logger.info(f"Start calculating stats for {len(updated_images)} images")
     u.calculate_and_save_stats(
-        project_id,
+        datasets,
         project_meta,
         updated_images,
         stats,
@@ -125,11 +123,13 @@ async def stats_endpoint(project_id: int):
     u.sew_chunks_to_stats_and_upload_chunks(
         stats, curr_projectfs_dir, curr_tf_project_dir
     )
-
     u.upload_sewed_stats(curr_projectfs_dir, curr_tf_project_dir)
-    u.push_cache(tf_cache_dir)
 
-    return f"The stats for {len(updated_images)} images were calculated."
+    u.push_cache(project_id, tf_cache_dir)
+
+    response.body = f"The stats for {len(updated_images)} images were calculated."
+    response.status_code = status.HTTP_200_OK
+    return response
 
 
 # TODO посмотреть для измененной аннотации почему update_at не появляется

@@ -1,8 +1,10 @@
 import json
 import os
 import math
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Dict, Tuple
 from datetime import datetime
+
+from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo
 
 from tqdm import tqdm
 import supervisely as sly
@@ -18,30 +20,91 @@ from supervisely.io.fs import (
 )
 
 
-def get_project_images_all(project_info):
+def pull_cache(project_id: int, tf_cache_dir: str) -> None:
+    if not g.api.file.dir_exists(g.TEAM_ID, tf_cache_dir):
+        sly.logger.warning("The cache directory not exists in team files.")
+        return
+
+    local_dir = f"{g.STORAGE_DIR}/_cache"
+    if sly.fs.dir_exists(local_dir):
+        sly.fs.clean_dir(local_dir)
+
+    g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_dir)
+    files = sly.fs.list_files(local_dir, [".json"])
+
+    for file in files:
+        if "meta_cache.json" in file:
+            with open(file, "r", encoding="utf-8") as f:
+                g.META_CACHE = {
+                    int(k): sly.ProjectMeta().from_json(v)
+                    for k, v in json.load(f).items()
+                }
+        else:
+            sly.logger.warning("The 'meta_cache.json' file not exists.")
+
+        if "images_cache.json" in file:
+            with open(file, "r", encoding="utf-8") as f:
+                g.IMAGES_CACHE = json.load(f)
+                g.PROJ_IMAGES_CACHE = {
+                    int(k): v
+                    for k, v in g.IMAGES_CACHE.get(str(project_id), {}).items()
+                }
+        else:
+            sly.logger.warning("The 'images_cache.json' file not exists.")
+
+    sly.logger.info("The cache was pulled from team files")
+
+
+def push_cache(project_id: int, tf_cache_dir: str):
+    local_cache_dir = f"{g.STORAGE_DIR}/_cache"
+    os.makedirs(local_cache_dir, exist_ok=True)
+
+    jcache = {k: v.to_json() for k, v in g.META_CACHE.items()}
+    with open(f"{local_cache_dir}/meta_cache.json", "w", encoding="utf-8") as f:
+        json.dump(jcache, f)
+
+    with open(f"{local_cache_dir}/images_cache.json", "w", encoding="utf-8") as f:
+        tmp = {str(k): v for k, v in g.PROJ_IMAGES_CACHE.items()}
+        g.IMAGES_CACHE.update({str(project_id): tmp})
+        json.dump(g.IMAGES_CACHE, f)
+
+    g.api.file.upload_directory(
+        g.TEAM_ID,
+        local_cache_dir,
+        tf_cache_dir,
+        change_name_if_conflict=False,
+        replace_if_conflict=True,
+    )
+
+    sly.logger.info("The cache was pushed to team files")
+
+
+def get_project_images_all(project_info: ProjectInfo) -> List[ImageInfo]:
     images_flat = []
     for dataset in g.api.dataset.get_list(project_info.id):
         images_flat += g.api.image.get_list(dataset.id)
     return images_flat
 
 
-def get_updated_images(project: sly.ImageInfo, project_meta: sly.ProjectMeta):
+def get_updated_images(
+    project: ImageInfo, project_meta: ProjectMeta
+) -> List[ImageInfo]:
     updated_images = []
     images_flat = get_project_images_all(project)
 
     if g.META_CACHE.get(project.id) is not None:
         if len(g.META_CACHE[project.id].obj_classes) != len(project_meta.obj_classes):
-            sly.logger.warn(
+            sly.logger.warning(
                 "Changes in the number of classes detected. Recalculate full stats... "  # TODO
             )
-            g.META_CACHE[project.id] = project_meta  # .to_json()
+            g.META_CACHE[project.id] = project_meta
             return images_flat
 
-    g.META_CACHE[project.id] = project_meta  # .to_json()
+    g.META_CACHE[project.id] = project_meta
 
     for image in images_flat:
         try:
-            image: sly.ImageInfo
+            image: ImageInfo
             cached_updated_at = g.PROJ_IMAGES_CACHE[image.id]
             if image.updated_at != cached_updated_at:
                 updated_images.append(image)
@@ -52,7 +115,7 @@ def get_updated_images(project: sly.ImageInfo, project_meta: sly.ProjectMeta):
 
     set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([image.id for image in images_flat])
     if set_A != set_B:
-        sly.logger.warn(
+        sly.logger.warning(
             f"The add/delete operation was detected in the images with the following ids: {set_A.symmetric_difference(set_B)}"
         )
         sly.logger.info("Recalculate full statistics")
@@ -65,73 +128,43 @@ def get_updated_images(project: sly.ImageInfo, project_meta: sly.ProjectMeta):
     return updated_images
 
 
-def get_indexes_dct(project_id):
-    idx_to_infos, infos_to_idx = {}, {}
+def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, dict]:
+    chunk_to_images, image_to_chunk = {}, {}
 
-    for dataset in g.api.dataset.get_list(project_id):
+    for dataset in datasets:
         images_all = g.api.image.get_list(dataset.id)
         images_all = sorted(images_all, key=lambda x: x.id)
 
         for idx, image_batch in enumerate(sly.batched(images_all, g.CHUNK_SIZE)):
             identifier = f"chunk_{idx}_{dataset.id}_{project_id}"
             for image in image_batch:
-                infos_to_idx[image.id] = identifier
-            idx_to_infos[identifier] = image_batch
+                image_to_chunk[image.id] = identifier
+            chunk_to_images[identifier] = image_batch
 
-    return idx_to_infos, infos_to_idx
-
-
-def pull_cache(tf_cache_dir: str):
-    if not g.api.file.dir_exists(g.TEAM_ID, tf_cache_dir):
-        return
-
-    local_dir = f"{g.STORAGE_DIR}/_cache"
-
-    if sly.fs.dir_exists(local_dir):
-        sly.fs.clean_dir(local_dir)
-    g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_dir)
-    files = sly.fs.list_files(local_dir, [".json"])
-
-    for file in files:
-        if "meta_cache.json" in file:
-            with open(file, "r", encoding="utf-8") as f:
-                g.META_CACHE = {
-                    int(k): sly.ProjectMeta().from_json(v)
-                    for k, v in json.load(f).items()
-                }
-        if "images_cache.json" in file:
-            with open(file, "r", encoding="utf-8") as f:
-                g.IMAGES_CACHE = json.load(f)
-                g.PROJ_IMAGES_CACHE = {
-                    int(k): v
-                    for k, v in g.IMAGES_CACHE.get(str(g.PROJECT_ID), {}).items()
-                }
-
-    sly.logger.info("The cache was pulled from team files")
+    return chunk_to_images, image_to_chunk
 
 
-def push_cache(tf_cache_dir: str):
-    local_cache_dir = f"{g.STORAGE_DIR}/_cache"
-    os.makedirs(local_cache_dir, exist_ok=True)
+def check_idxs_integrity(
+    project, stats, curr_projectfs_dir, idx_to_infos, updated_images
+):
+    if sly.fs.dir_empty(curr_projectfs_dir):
+        sly.logger.warning("The buffer is empty. Calculate full stats")
+        if len(updated_images) != project.items_count:
+            sly.logger.warning(
+                f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
+            )
+            updated_images = get_project_images_all(project)
+    else:
+        for stat in stats:
+            files = sly.fs.list_files(
+                f"{curr_projectfs_dir}/{stat.basename_stem}",
+                [".npy"],
+            )
 
-    jcache = {k: v.to_json() for k, v in g.META_CACHE.items()}
-    with open(f"{local_cache_dir}/meta_cache.json", "w", encoding="utf-8") as f:
-        json.dump(jcache, f)
-
-    with open(f"{local_cache_dir}/images_cache.json", "w", encoding="utf-8") as f:
-        tmp = {str(k): v for k, v in g.PROJ_IMAGES_CACHE.items()}
-        g.IMAGES_CACHE.update({str(g.PROJECT_ID): tmp})
-        json.dump(g.IMAGES_CACHE, f)
-
-    g.api.file.upload_directory(
-        g.TEAM_ID,
-        local_cache_dir,
-        tf_cache_dir,
-        change_name_if_conflict=False,
-        replace_if_conflict=True,
-    )
-
-    sly.logger.info("The cache was pushed to team files")
+            if len(files) != len(idx_to_infos.keys()):
+                msg = f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}"
+                sly.logger.error(msg)
+                raise RuntimeError(msg)
 
 
 def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
@@ -164,32 +197,9 @@ def remove_junk(project, datasets, files_fs):
             rm_cnt += 1
 
     if rm_cnt > 0:
-        sly.logger.warn(
+        sly.logger.warning(
             f"The {rm_cnt} old or junk chunk files were detected and removed from the buffer"
         )
-
-
-def check_idxs_integrity(
-    project, stats, curr_projectfs_dir, idx_to_infos, updated_images
-):
-    if sly.fs.dir_empty(curr_projectfs_dir):
-        sly.logger.warn("The buffer is empty. Calculate full stats")
-        if len(updated_images) != project.items_count:
-            sly.logger.warn(
-                f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
-            )
-            updated_images = get_project_images_all(project)
-    else:
-        for stat in stats:
-            files = sly.fs.list_files(
-                f"{curr_projectfs_dir}/{stat.basename_stem}",
-                [".npy"],
-            )
-
-            if len(files) != len(idx_to_infos.keys()):
-                msg = f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}"
-                sly.logger.error(msg)
-                raise RuntimeError(msg)
 
 
 def download_stats_chunks_to_buffer(curr_tf_project_dir, curr_projectfs_dir, stats):
@@ -218,28 +228,30 @@ def download_stats_chunks_to_buffer(curr_tf_project_dir, curr_projectfs_dir, sta
 
 
 def calculate_and_save_stats(
-    project_id,
+    datasets,
     project_meta,
     updated_images,
     stats,
     tf_all_paths,
     curr_projectfs_dir,
-    idx_to_infos,
-    infos_to_idx,
+    chunk_to_images,
+    image_to_chunk,
 ):
     with tqdm(desc="Calculating stats", total=len(updated_images)) as pbar:
-        for dataset in g.api.dataset.get_list(project_id):
-            images_upd = [
+        for dataset in datasets:
+            ds_updated_images = [
                 image for image in updated_images if image.dataset_id == dataset.id
             ]
-            idx_upd = list(set([infos_to_idx[image.id] for image in images_upd]))
+            updated_chunks = list(
+                set([image_to_chunk[image.id] for image in ds_updated_images])
+            )
 
-            for identifier in idx_upd:
-                batch = idx_to_infos[identifier]
-                image_ids = [image.id for image in batch]
+            for chunk in updated_chunks:
+                images_batch = chunk_to_images[chunk]
+                image_ids = [image.id for image in images_batch]
                 datetime_objects = [
                     datetime.fromisoformat(timestamp[:-1])
-                    for timestamp in [image.updated_at for image in batch]
+                    for timestamp in [image.updated_at for image in images_batch]
                 ]
                 latest_datetime = sorted(datetime_objects, reverse=True)[0]
 
@@ -249,7 +261,7 @@ def calculate_and_save_stats(
                     for ann_json in janns
                 ]
 
-                for img, ann in zip(batch, anns):
+                for img, ann in zip(images_batch, anns):
                     for stat in stats:
                         stat.update(img, ann)
                     pbar.update(1)
@@ -261,7 +273,7 @@ def calculate_and_save_stats(
                     tf_stat_chunks = [
                         path
                         for path in tf_all_paths
-                        if (stat.basename_stem in path) and (identifier in path)
+                        if (stat.basename_stem in path) and (chunk in path)
                     ]
 
                     if len(tf_stat_chunks) > 0:
@@ -276,11 +288,11 @@ def calculate_and_save_stats(
                         if latest_datetime > sorted(datetime_objects, reverse=True)[0]:
                             g.TF_OLD_CHUNKS += tf_stat_chunks
                             for path in list_files(savedir, [".npy"]):
-                                if identifier in path:
+                                if chunk in path:
                                     os.remove(path)
 
                     np.save(
-                        f"{savedir}/{identifier}_{g.CHUNK_SIZE}_{latest_datetime.isoformat()}.npy",
+                        f"{savedir}/{chunk}_{g.CHUNK_SIZE}_{latest_datetime.isoformat()}.npy",
                         stat.to_numpy_raw(),
                     )
                     stat.clean()
@@ -340,7 +352,7 @@ def upload_sewed_stats(curr_projectfs_dir, curr_tf_project_dir):
     ]
 
     with tqdm(
-        desc=f"Uploading .json stats",
+        desc="Uploading .json stats",
         total=sum([get_file_size(path) for path in json_paths]),
         unit="B",
         unit_scale=True,

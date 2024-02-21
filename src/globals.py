@@ -15,7 +15,7 @@ api = sly.Api.from_env()
 TEAM_ID = sly.env.team_id()
 WORKSPACE_ID = sly.env.workspace_id()
 # PROJECT_ID = sly.env.project_id()
-PROJECT_ID = None
+# PROJECT_ID = None
 
 
 STORAGE_DIR = sly.app.get_data_dir()
@@ -25,4 +25,17 @@ PROJ_IMAGES_CACHE = {}
 IMAGES_CACHE = {}
 META_CACHE = {}
 TF_OLD_CHUNKS = []
+
+
+def initialize_global_cache():
+    global PROJ_IMAGES_CACHE
+    PROJ_IMAGES_CACHE = {}
+    global IMAGES_CACHE
+    IMAGES_CACHE = {}
+    global META_CACHE
+    META_CACHE = {}
+    global TF_OLD_CHUNKS
+    TF_OLD_CHUNKS = []
+
+
 CHUNK_SIZE = 100
