@@ -31,14 +31,14 @@ def pull_cache(project_id: int, tf_cache_dir: str, curr_tf_project_dir: str) -> 
         sly.logger.warning("The project directory not exists in team files.")
         force_stats_recalc = True
 
-    local_dir = f"{g.STORAGE_DIR}/_cache"
-    if sly.fs.dir_exists(local_dir):
-        sly.fs.clean_dir(local_dir)
+    local_cache_dir = f"{g.STORAGE_DIR}/_cache"
+    if sly.fs.dir_exists(local_cache_dir):
+        sly.fs.clean_dir(local_cache_dir)
 
-    g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_dir)
+    g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_cache_dir)
 
-    path = os.path.join(local_dir, "meta_cache.json")
-    if os.path.exists(os.path.join(local_dir, "meta_cache.json")):
+    path = os.path.join(local_cache_dir, "meta_cache.json")
+    if os.path.exists(os.path.join(local_cache_dir, "meta_cache.json")):
         with open(path, "r", encoding="utf-8") as f:
             g.META_CACHE = {
                 int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()
@@ -49,7 +49,7 @@ def pull_cache(project_id: int, tf_cache_dir: str, curr_tf_project_dir: str) -> 
         )
         force_stats_recalc = True
 
-    path = os.path.join(local_dir, "images_cache.json")
+    path = os.path.join(local_cache_dir, "images_cache.json")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             g.IMAGES_CACHE = json.load(f)
@@ -66,9 +66,44 @@ def pull_cache(project_id: int, tf_cache_dir: str, curr_tf_project_dir: str) -> 
     return force_stats_recalc
 
 
+def get_iso_timestamp():
+    now = datetime.now()
+    ts = datetime.timestamp(now)
+    dt = datetime.fromtimestamp(ts)
+    return str(dt.isoformat())
+
+
 def push_cache(project_id: int, tf_cache_dir: str):
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     os.makedirs(local_cache_dir, exist_ok=True)
+
+    stats_meta = {}
+    if os.path.exists(f"{local_cache_dir}/project_statistics_meta.json"):
+        with open(
+            f"{local_cache_dir}/project_statistics_meta.json", "w", encoding="utf-8"
+        ) as f:
+            stats_meta = json.load(f)
+            smeta = stats_meta.get(str(project_id))
+            if smeta is not None:
+                smeta["updated_at"] = get_iso_timestamp()
+            else:
+                stats_meta = {
+                    str(project_id): {
+                        "updated_at": get_iso_timestamp(),
+                        "created_at": get_iso_timestamp(),
+                    }
+                }
+    else:
+        stats_meta = {
+            str(project_id): {
+                "updated_at": get_iso_timestamp(),
+                "created_at": get_iso_timestamp(),
+            }
+        }
+        with open(
+            f"{local_cache_dir}/project_statistics_meta.json", "w", encoding="utf-8"
+        ) as f:
+            json.dump(stats_meta, f)
 
     jcache = {k: v.to_json() for k, v in g.META_CACHE.items()}
     with open(f"{local_cache_dir}/meta_cache.json", "w", encoding="utf-8") as f:
