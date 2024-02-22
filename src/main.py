@@ -33,13 +33,14 @@ server = app.get_server()
 @server.get("/get-stats", response_class=Response)
 async def stats_endpoint(response: Response, project_id: int):
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
+    project = g.api.project.get_info_by_id(project_id)
+    curr_tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
 
     g.initialize_global_cache()
-    u.pull_cache(project_id, tf_cache_dir)
+    force_stats_recalc = u.pull_cache(project_id, tf_cache_dir, curr_tf_project_dir)
 
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
-    project = g.api.project.get_info_by_id(project_id)
     project_stats = g.api.project.get_stats(project_id)
     datasets = g.api.dataset.get_list(project_id)
 
@@ -50,7 +51,9 @@ async def stats_endpoint(response: Response, project_id: int):
         f"The project consists of {project.items_count} images and has {len(datasets)} datasets"
     )
 
-    updated_images = u.get_updated_images(project, project_meta, project_stats)
+    updated_images = u.get_updated_images(
+        project, project_meta, project_stats, force_stats_recalc
+    )
 
     if len(updated_images) == 0:
         sly.logger.warn("Nothing to update. Skipping stats calculation...")
@@ -73,8 +76,6 @@ async def stats_endpoint(response: Response, project_id: int):
     if sly.fs.dir_exists(curr_projectfs_dir):
         sly.fs.clean_dir(curr_projectfs_dir)
     os.makedirs(curr_projectfs_dir, exist_ok=True)
-
-    curr_tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
 
     u.download_stats_chunks_to_buffer(curr_tf_project_dir, curr_projectfs_dir, stats)
 

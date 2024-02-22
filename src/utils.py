@@ -20,39 +20,50 @@ from supervisely.io.fs import (
 )
 
 
-def pull_cache(project_id: int, tf_cache_dir: str) -> None:
+def pull_cache(project_id: int, tf_cache_dir: str, curr_tf_project_dir: str) -> bool:
+    force_stats_recalc = False
+
     if not g.api.file.dir_exists(g.TEAM_ID, tf_cache_dir):
-        sly.logger.warning("The cache directory not exists in team files.")
-        return
+        sly.logger.warning("The cache directory not exists in team files. ")
+        force_stats_recalc = True
+
+    if not g.api.file.dir_exists(g.TEAM_ID, curr_tf_project_dir):
+        sly.logger.warning("The project directory not exists in team files.")
+        force_stats_recalc = True
 
     local_dir = f"{g.STORAGE_DIR}/_cache"
     if sly.fs.dir_exists(local_dir):
         sly.fs.clean_dir(local_dir)
 
     g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_dir)
-    files = sly.fs.list_files(local_dir, [".json"])
 
-    for file in files:
-        if "meta_cache.json" in file:
-            with open(file, "r", encoding="utf-8") as f:
-                g.META_CACHE = {
-                    int(k): sly.ProjectMeta().from_json(v)
-                    for k, v in json.load(f).items()
-                }
-        else:
-            sly.logger.warning("The 'meta_cache.json' file not exists.")
+    path = os.path.join(local_dir, "meta_cache.json")
+    if os.path.exists(os.path.join(local_dir, "meta_cache.json")):
+        with open(path, "r", encoding="utf-8") as f:
+            g.META_CACHE = {
+                int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()
+            }
+    else:
+        sly.logger.info(
+            "The 'meta_cache.json' file not exists. Stats will be recalculated."
+        )
+        force_stats_recalc = True
 
-        if "images_cache.json" in file:
-            with open(file, "r", encoding="utf-8") as f:
-                g.IMAGES_CACHE = json.load(f)
-                g.PROJ_IMAGES_CACHE = {
-                    int(k): v
-                    for k, v in g.IMAGES_CACHE.get(str(project_id), {}).items()
-                }
-        else:
-            sly.logger.warning("The 'images_cache.json' file not exists.")
+    path = os.path.join(local_dir, "images_cache.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            g.IMAGES_CACHE = json.load(f)
+            g.PROJ_IMAGES_CACHE = {
+                int(k): v for k, v in g.IMAGES_CACHE.get(str(project_id), {}).items()
+            }
+    else:
+        sly.logger.info(
+            "The 'images_cache.json' file not exists. Stats will be recalculated."
+        )
+        force_stats_recalc = True
 
     sly.logger.info("The cache was pulled from team files")
+    return force_stats_recalc
 
 
 def push_cache(project_id: int, tf_cache_dir: str):
@@ -87,7 +98,10 @@ def get_project_images_all(project_info: ProjectInfo) -> List[ImageInfo]:
 
 
 def get_updated_images(
-    project: ProjectInfo, project_meta: ProjectMeta, project_stats: dict
+    project: ProjectInfo,
+    project_meta: ProjectMeta,
+    project_stats: dict,
+    force_stats_recalc: bool,
 ) -> List[ImageInfo]:
     updated_images = []
     if project_stats["images"]["total"]["imagesMarked"] == 0:
@@ -95,6 +109,9 @@ def get_updated_images(
         return updated_images
 
     images_flat = get_project_images_all(project)
+
+    if force_stats_recalc is True:
+        return images_flat
 
     if g.META_CACHE.get(project.id) is not None:
         if len(g.META_CACHE[project.id].obj_classes) != len(project_meta.obj_classes):
