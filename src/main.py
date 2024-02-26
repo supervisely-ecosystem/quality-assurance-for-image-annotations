@@ -51,7 +51,7 @@ async def stats_endpoint(response: Response, project_id: int):
         f"The project consists of {project.items_count} images and has {len(datasets)} datasets"
     )
 
-    updated_images = u.get_updated_images(
+    updated_images, updated_classes = u.get_updated_images_and_classes(
         project, project_meta, project_stats, force_stats_recalc
     )
 
@@ -120,8 +120,8 @@ async def stats_endpoint(response: Response, project_id: int):
     )
 
     u.delete_old_chunks()
-    u.sew_chunks_to_stats_and_upload_chunks(
-        stats, curr_projectfs_dir, curr_tf_project_dir
+    u.sew_chunks_to_json_and_upload_chunks(
+        stats, curr_projectfs_dir, curr_tf_project_dir, updated_classes
     )
     u.upload_sewed_stats(curr_projectfs_dir, curr_tf_project_dir)
 
