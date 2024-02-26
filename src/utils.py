@@ -70,8 +70,8 @@ def pull_cache(project_id: int, tf_cache_dir: str, curr_tf_project_dir: str) -> 
 def get_iso_timestamp():
     now = datetime.now()
     ts = datetime.timestamp(now)
-    dt = datetime.fromtimestamp(ts)
-    return str(dt.isoformat())
+    dt = datetime.utcfromtimestamp(ts)
+    return str(dt.isoformat()) + "Z"
 
 
 def push_cache(project_id: int, tf_cache_dir: str):
