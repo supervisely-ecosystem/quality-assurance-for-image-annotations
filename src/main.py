@@ -84,7 +84,7 @@ async def stats_endpoint(response: Response, project_id: int):
     u.remove_junk(project, datasets, files_fs)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
-    u.check_idxs_integrity(
+    updated_images = u.check_idxs_integrity(
         project, stats, curr_projectfs_dir, idx_to_infos, updated_images
     )
 

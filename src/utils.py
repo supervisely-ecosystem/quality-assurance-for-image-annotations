@@ -29,14 +29,25 @@ def pull_cache(project_id: int, tf_cache_dir: str, curr_tf_project_dir: str) -> 
 
     if not g.api.file.dir_exists(g.TEAM_ID, tf_cache_dir):
         sly.logger.warning("The cache directory not exists in team files. ")
-        # force_stats_recalc = True
-        return
+        return False
 
     if not g.api.file.dir_exists(g.TEAM_ID, curr_tf_project_dir):
         sly.logger.warning("The project directory not exists in team files.")
-        return
+        return False
 
     g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_cache_dir)
+
+    spath = f"{local_cache_dir}/project_statistics_meta.json"
+    if os.path.exists(spath):
+        with open(spath, "r", encoding="utf-8") as f:
+            stats_meta = json.load(f)
+        smeta = stats_meta.get(str(project_id))
+        if smeta is not None:
+            if smeta["chunk_size"] != g.CHUNK_SIZE:
+                sly.logger.warning(
+                    "The chunk size has changed. Recalculating full stats..."
+                )
+                return True
 
     path = os.path.join(local_cache_dir, "meta_cache.json")
     if os.path.exists(os.path.join(local_cache_dir, "meta_cache.json")):
@@ -89,11 +100,13 @@ def push_cache(project_id: int, tf_cache_dir: str):
         smeta = stats_meta.get(str(project_id))
         if smeta is not None:
             smeta["updated_at"] = ts
+            smeta["chunk_size"] = g.CHUNK_SIZE
             stats_meta[str(project_id)] = smeta
         else:
             stats_meta[str(project_id)] = {
                 "updated_at": ts,
                 "created_at": ts,
+                "chunk_size": g.CHUNK_SIZE,
             }
 
         with open(spath, "w", encoding="utf-8") as f:
@@ -103,6 +116,7 @@ def push_cache(project_id: int, tf_cache_dir: str):
             str(project_id): {
                 "updated_at": ts,
                 "created_at": ts,
+                "chunk_size": g.CHUNK_SIZE,
             }
         }
         with open(spath, "w", encoding="utf-8") as f:
@@ -154,14 +168,14 @@ def get_updated_images_and_classes(
     if g.META_CACHE.get(project.id) is not None:
         cached_classes = g.META_CACHE[project.id].obj_classes
         if len(cached_classes) != len(project_meta.obj_classes):
-            sly.logger.info("Changes in the number of classes detected.")
-
             updated_classes = list(
                 set(cached_classes.keys()).symmetric_difference(
                     set(project_meta.obj_classes.keys())
                 )
             )
-
+            sly.logger.info(
+                f"Changes in the number of classes detected: {updated_classes}"
+            )
             # sly.logger.warning(
             #     "Changes in the number of classes detected. Recalculate full stats... "  # TODO
             # )
@@ -214,14 +228,14 @@ def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, 
 
 def check_idxs_integrity(
     project, stats, curr_projectfs_dir, idx_to_infos, updated_images
-):
+) -> list:
     if sly.fs.dir_empty(curr_projectfs_dir):
         sly.logger.warning("The buffer is empty. Calculate full stats")
         if len(updated_images) != project.items_count:
             sly.logger.warning(
                 f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
             )
-            updated_images = get_project_images_all(project)
+            return get_project_images_all(project)
     else:
         for stat in stats:
             files = sly.fs.list_files(
@@ -230,9 +244,12 @@ def check_idxs_integrity(
             )
 
             if len(files) != len(idx_to_infos.keys()):
-                msg = f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}"
-                sly.logger.error(msg)
-                raise RuntimeError(msg)
+                msg = f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
+                sly.logger.warning(msg)
+                # raise RuntimeError(msg)
+                return get_project_images_all(project)
+
+    return updated_images
 
 
 def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
@@ -392,6 +409,8 @@ def sew_chunks_to_json_and_upload_chunks(
             f"{curr_projectfs_dir}/{stat.basename_stem}.json", "w", encoding="utf-8"
         ) as f:
             json.dump(stat.to_json(), f)
+
+        stat.to_image(f"{curr_projectfs_dir}/{stat.basename_stem}.png")
 
         npy_paths = list_files(
             f"{curr_projectfs_dir}/{stat.basename_stem}", valid_extensions=[".npy"]
