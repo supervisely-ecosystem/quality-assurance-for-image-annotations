@@ -154,11 +154,10 @@ def get_project_images_all(project_info: ProjectInfo) -> List[ImageInfo]:
 def get_updated_images_and_classes(
     project: ProjectInfo,
     project_meta: ProjectMeta,
-    project_stats: dict,
     force_stats_recalc: bool,
 ) -> List[ImageInfo]:
     updated_images, updated_classes = [], []
-    if project_stats["images"]["total"]["imagesMarked"] == 0:
+    if len(project_meta.obj_classes.items()) == 0:
         sly.logger.info("The project is fully unlabeled")
         return updated_images
 
@@ -289,31 +288,28 @@ def remove_junk(project, datasets, files_fs):
         )
 
 
-def download_stats_chunks_to_buffer(
-    team_id, curr_tf_project_dir, curr_projectfs_dir, stats
-):
-    if g.api.file.dir_exists(team_id, curr_tf_project_dir) is True:
-        total_size = sum(
-            [
-                g.api.file.get_directory_size(
-                    team_id, f"{curr_tf_project_dir}/{stat.basename_stem}/"
-                )
-                for stat in stats
-            ]
-        )
-        with tqdm(
-            desc=f"Downloading stats chunks to buffer",
-            total=total_size,
-            unit="B",
-            unit_scale=True,
-        ) as pbar:
-            for stat in stats:
-                g.api.file.download_directory(
-                    team_id,
-                    f"{curr_tf_project_dir}/{stat.basename_stem}",
-                    f"{curr_projectfs_dir}/{stat.basename_stem}",
-                    pbar,
-                )
+def download_stats_chunks_to_buffer(team_id, tf_project_dir, project_fs_dir, stats):
+    total_size = sum(
+        [
+            g.api.file.get_directory_size(
+                team_id, f"{tf_project_dir}/{stat.basename_stem}/"
+            )
+            for stat in stats
+        ]
+    )
+    with tqdm(
+        desc=f"Downloading stats chunks to buffer",
+        total=total_size,
+        unit="B",
+        unit_scale=True,
+    ) as pbar:
+        for stat in stats:
+            g.api.file.download_directory(
+                team_id,
+                f"{tf_project_dir}/{stat.basename_stem}",
+                f"{project_fs_dir}/{stat.basename_stem}",
+                pbar,
+            )
 
 
 def calculate_and_save_stats(
@@ -409,10 +405,11 @@ def sew_chunks_to_json_and_upload_chunks(
             chunks_dir=f"{curr_projectfs_dir}/{stat.basename_stem}/",
             updated_classes=updated_classes,
         )
-        with open(
-            f"{curr_projectfs_dir}/{stat.basename_stem}.json", "w", encoding="utf-8"
-        ) as f:
-            json.dump(stat.to_json(), f)
+        if stat.to_json() is not None:
+            with open(
+                f"{curr_projectfs_dir}/{stat.basename_stem}.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(stat.to_json(), f)
 
         stat.to_image(f"{curr_projectfs_dir}/{stat.basename_stem}.png")
 

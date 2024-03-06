@@ -55,7 +55,7 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     )
 
     updated_images, updated_classes = u.get_updated_images_and_classes(
-        project, project_meta, project_stats, force_stats_recalc
+        project, project_meta, force_stats_recalc
     )
 
     if len(updated_images) == 0:
@@ -80,7 +80,10 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
-    u.download_stats_chunks_to_buffer(team.id, tf_project_dir, project_fs_dir, stats)
+    if g.api.file.dir_exists(team.id, project_fs_dir) is True:
+        u.download_stats_chunks_to_buffer(
+            team.id, tf_project_dir, project_fs_dir, stats
+        )
 
     files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
     u.check_datasets_consistency(project, datasets, files_fs, len(stats))
