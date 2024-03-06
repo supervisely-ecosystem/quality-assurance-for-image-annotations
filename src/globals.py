@@ -12,11 +12,10 @@ if sly.is_development():
 
 api = sly.Api.from_env()
 
-TEAM_ID = sly.env.team_id()
+# TEAM_ID = sly.env.team_id()
 WORKSPACE_ID = sly.env.workspace_id()
-# PROJECT_ID = sly.env.project_id()
-# PROJECT_ID = None
-
+if sly.is_production():
+    TASK_ID = sly.env.task_id()
 
 STORAGE_DIR = sly.app.get_data_dir()
 TF_STATS_DIR = "/stats"

@@ -37,12 +37,10 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     team = g.api.team.get_info_by_id(project.team_id)
 
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
-    curr_tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
+    tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
 
     g.initialize_global_cache()
-    force_stats_recalc = u.pull_cache(
-        team.id, project_id, tf_cache_dir, curr_tf_project_dir
-    )
+    force_stats_recalc = u.pull_cache(team.id, project_id, tf_cache_dir, tf_project_dir)
 
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
@@ -77,27 +75,24 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         dtools.ClassesTreemap(project_meta),
     ]
 
-    curr_projectfs_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
-    if sly.fs.dir_exists(curr_projectfs_dir):
-        sly.fs.clean_dir(curr_projectfs_dir)
-    os.makedirs(curr_projectfs_dir, exist_ok=True)
+    project_fs_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
+    if sly.fs.dir_exists(project_fs_dir):
+        sly.fs.clean_dir(project_fs_dir)
+    os.makedirs(project_fs_dir, exist_ok=True)
 
-    u.download_stats_chunks_to_buffer(
-        team.id, curr_tf_project_dir, curr_projectfs_dir, stats
-    )
+    u.download_stats_chunks_to_buffer(team.id, tf_project_dir, project_fs_dir, stats)
 
-    files_fs = list_files_recursively(curr_projectfs_dir, valid_extensions=[".npy"])
+    files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
     u.check_datasets_consistency(project, datasets, files_fs, len(stats))
     u.remove_junk(project, datasets, files_fs)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
     updated_images = u.check_idxs_integrity(
-        project, stats, curr_projectfs_dir, idx_to_infos, updated_images
+        project, stats, project_fs_dir, idx_to_infos, updated_images
     )
 
     tf_all_paths = [
-        info.path
-        for info in g.api.file.list2(team.id, curr_tf_project_dir, recursive=True)
+        info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
     ]
 
     # unique_batch_sizes = set(
@@ -121,21 +116,26 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         updated_images,
         stats,
         tf_all_paths,
-        curr_projectfs_dir,
+        project_fs_dir,
         idx_to_infos,
         infos_to_idx,
     )
 
     u.delete_old_chunks(team.id)
     u.sew_chunks_to_json_and_upload_chunks(
-        team.id, stats, curr_projectfs_dir, curr_tf_project_dir, updated_classes
+        team.id, stats, project_fs_dir, tf_project_dir, updated_classes
     )
-    u.upload_sewed_stats(team.id, curr_projectfs_dir, curr_tf_project_dir)
+    u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
     u.push_cache(team.id, project_id, tf_cache_dir)
 
     response.body = f"The stats for {len(updated_images)} images were calculated."
     response.status_code = status.HTTP_200_OK
+    if sly.is_production():
+        file = g.api.file.get_info_by_path(
+            team.id, tf_project_dir + "/class_balance.json"
+        )
+        g.api.task.set_output_directory(g.TASK_ID, file.id, tf_cache_dir)
     return response
 
 
