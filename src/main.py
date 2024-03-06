@@ -32,6 +32,10 @@ server = app.get_server()
 
 @server.get("/get-stats", response_class=Response)
 async def stats_endpoint(response: Response, project_id: int):
+    key = response.headers.get("x-api-key")
+
+    print(key)
+    print(response.headers.keys())
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
     project = g.api.project.get_info_by_id(project_id)
     curr_tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
