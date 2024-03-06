@@ -32,19 +32,17 @@ server = app.get_server()
 
 @server.get("/get-stats", response_class=Response)
 async def stats_endpoint(request: Request, response: Response, project_id: int):
-    sly.logger.info(str(request.headers.keys()))
 
-    headers = request.headers
-    x_api_key = headers.get("x-api-key")
-
-    sly.logger.info(f"xapi: {x_api_key}")
+    project = g.api.project.get_info_by_id(project_id, raise_error=True)
+    team = g.api.team.get_info_by_id(project.team_id)
 
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
-    project = g.api.project.get_info_by_id(project_id)
     curr_tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
 
     g.initialize_global_cache()
-    force_stats_recalc = u.pull_cache(project_id, tf_cache_dir, curr_tf_project_dir)
+    force_stats_recalc = u.pull_cache(
+        team.id, project_id, tf_cache_dir, curr_tf_project_dir
+    )
 
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
@@ -84,7 +82,9 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         sly.fs.clean_dir(curr_projectfs_dir)
     os.makedirs(curr_projectfs_dir, exist_ok=True)
 
-    u.download_stats_chunks_to_buffer(curr_tf_project_dir, curr_projectfs_dir, stats)
+    u.download_stats_chunks_to_buffer(
+        team.id, curr_tf_project_dir, curr_projectfs_dir, stats
+    )
 
     files_fs = list_files_recursively(curr_projectfs_dir, valid_extensions=[".npy"])
     u.check_datasets_consistency(project, datasets, files_fs, len(stats))
@@ -97,7 +97,7 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     tf_all_paths = [
         info.path
-        for info in g.api.file.list2(g.TEAM_ID, curr_tf_project_dir, recursive=True)
+        for info in g.api.file.list2(team.id, curr_tf_project_dir, recursive=True)
     ]
 
     # unique_batch_sizes = set(
@@ -126,13 +126,13 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         infos_to_idx,
     )
 
-    u.delete_old_chunks()
+    u.delete_old_chunks(team.id)
     u.sew_chunks_to_json_and_upload_chunks(
-        stats, curr_projectfs_dir, curr_tf_project_dir, updated_classes
+        team.id, stats, curr_projectfs_dir, curr_tf_project_dir, updated_classes
     )
-    u.upload_sewed_stats(curr_projectfs_dir, curr_tf_project_dir)
+    u.upload_sewed_stats(team.id, curr_projectfs_dir, curr_tf_project_dir)
 
-    u.push_cache(project_id, tf_cache_dir)
+    u.push_cache(team.id, project_id, tf_cache_dir)
 
     response.body = f"The stats for {len(updated_images)} images were calculated."
     response.status_code = status.HTTP_200_OK

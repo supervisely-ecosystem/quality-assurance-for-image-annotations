@@ -38,4 +38,4 @@ def initialize_global_cache():
     TF_OLD_CHUNKS = []
 
 
-CHUNK_SIZE = 1000
+CHUNK_SIZE = 500

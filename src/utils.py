@@ -20,22 +20,24 @@ from supervisely.io.fs import (
 )
 
 
-def pull_cache(project_id: int, tf_cache_dir: str, curr_tf_project_dir: str) -> bool:
+def pull_cache(
+    team_id: int, project_id: int, tf_cache_dir: str, curr_tf_project_dir: str
+) -> bool:
     force_stats_recalc = False
 
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     if sly.fs.dir_exists(local_cache_dir):
         sly.fs.clean_dir(local_cache_dir)
 
-    if not g.api.file.dir_exists(g.TEAM_ID, tf_cache_dir):
+    if not g.api.file.dir_exists(team_id, tf_cache_dir):
         sly.logger.warning("The cache directory not exists in team files. ")
         return False
 
-    if not g.api.file.dir_exists(g.TEAM_ID, curr_tf_project_dir):
+    if not g.api.file.dir_exists(team_id, curr_tf_project_dir):
         sly.logger.warning("The project directory not exists in team files.")
         return False
 
-    g.api.file.download_directory(g.TEAM_ID, tf_cache_dir, local_cache_dir)
+    g.api.file.download_directory(team_id, tf_cache_dir, local_cache_dir)
 
     spath = f"{local_cache_dir}/project_statistics_meta.json"
     if os.path.exists(spath):
@@ -85,7 +87,7 @@ def get_iso_timestamp():
     return str(dt.isoformat()) + "Z"
 
 
-def push_cache(project_id: int, tf_cache_dir: str):
+def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     os.makedirs(local_cache_dir, exist_ok=True)
 
@@ -132,7 +134,7 @@ def push_cache(project_id: int, tf_cache_dir: str):
         json.dump(g.IMAGES_CACHE, f)
 
     g.api.file.upload_directory(
-        g.TEAM_ID,
+        team_id,
         local_cache_dir,
         tf_cache_dir,
         change_name_if_conflict=False,
@@ -287,12 +289,14 @@ def remove_junk(project, datasets, files_fs):
         )
 
 
-def download_stats_chunks_to_buffer(curr_tf_project_dir, curr_projectfs_dir, stats):
-    if g.api.file.dir_exists(g.TEAM_ID, curr_tf_project_dir) is True:
+def download_stats_chunks_to_buffer(
+    team_id, curr_tf_project_dir, curr_projectfs_dir, stats
+):
+    if g.api.file.dir_exists(team_id, curr_tf_project_dir) is True:
         total_size = sum(
             [
                 g.api.file.get_directory_size(
-                    g.TEAM_ID, f"{curr_tf_project_dir}/{stat.basename_stem}/"
+                    team_id, f"{curr_tf_project_dir}/{stat.basename_stem}/"
                 )
                 for stat in stats
             ]
@@ -305,7 +309,7 @@ def download_stats_chunks_to_buffer(curr_tf_project_dir, curr_projectfs_dir, sta
         ) as pbar:
             for stat in stats:
                 g.api.file.download_directory(
-                    g.TEAM_ID,
+                    team_id,
                     f"{curr_tf_project_dir}/{stat.basename_stem}",
                     f"{curr_projectfs_dir}/{stat.basename_stem}",
                     pbar,
@@ -383,7 +387,7 @@ def calculate_and_save_stats(
                     stat.clean()
 
 
-def delete_old_chunks():
+def delete_old_chunks(team_id):
     if len(g.TF_OLD_CHUNKS) > 0:
         with tqdm(
             desc=f"Deleting old chunks in team files",
@@ -391,14 +395,14 @@ def delete_old_chunks():
             unit="B",
             unit_scale=True,
         ) as pbar:
-            g.api.file.remove_batch(g.TEAM_ID, g.TF_OLD_CHUNKS, progress_cb=pbar)
+            g.api.file.remove_batch(team_id, g.TF_OLD_CHUNKS, progress_cb=pbar)
 
         sly.logger.info(f"{len(g.TF_OLD_CHUNKS)} old chunks succesfully deleted")
         g.TF_OLD_CHUNKS = []
 
 
 def sew_chunks_to_json_and_upload_chunks(
-    stats, curr_projectfs_dir, curr_tf_project_dir, updated_classes
+    team_id, stats, curr_projectfs_dir, curr_tf_project_dir, updated_classes
 ):
     for stat in stats:
         stat.sew_chunks(
@@ -428,14 +432,14 @@ def sew_chunks_to_json_and_upload_chunks(
             unit="B",
             unit_scale=True,
         ) as pbar:
-            g.api.file.upload_bulk(g.TEAM_ID, npy_paths, dst_npy_paths, pbar)
+            g.api.file.upload_bulk(team_id, npy_paths, dst_npy_paths, pbar)
 
         sly.logger.info(
             f"{stat.basename_stem}: {len(npy_paths)} chunks succesfully uploaded"
         )
 
 
-def upload_sewed_stats(curr_projectfs_dir, curr_tf_project_dir):
+def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
     remove_files_with_null(curr_projectfs_dir)
     json_paths = list_files(curr_projectfs_dir, valid_extensions=[".json"])
     dst_json_paths = [
@@ -448,7 +452,7 @@ def upload_sewed_stats(curr_projectfs_dir, curr_tf_project_dir):
         unit="B",
         unit_scale=True,
     ) as pbar:
-        g.api.file.upload_bulk(g.TEAM_ID, json_paths, dst_json_paths, pbar)
+        g.api.file.upload_bulk(team_id, json_paths, dst_json_paths, pbar)
 
     sly.logger.info(
         f"{len(json_paths)} updated .json stats succesfully updated and uploaded"
