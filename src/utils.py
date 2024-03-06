@@ -155,11 +155,11 @@ def get_updated_images_and_classes(
     project: ProjectInfo,
     project_meta: ProjectMeta,
     force_stats_recalc: bool,
-) -> List[ImageInfo]:
+) -> Tuple[List[ImageInfo], List[str]]:
     updated_images, updated_classes = [], []
     if len(project_meta.obj_classes.items()) == 0:
         sly.logger.info("The project is fully unlabeled")
-        return updated_images
+        return updated_images, updated_classes
 
     images_flat = get_project_images_all(project)
 
