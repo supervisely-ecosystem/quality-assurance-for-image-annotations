@@ -136,7 +136,8 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
             team.id, tf_project_dir + "/class_balance.json"
         )
         g.api.task.set_output_directory(g.api.task_id, file.id, tf_cache_dir)
-        sly.logger.info(f"task id: {g.api.task_id}, file id: {file.id}")
+        # sly.logger.info(f"task id: {g.api.task_id}, file id: {file.id}")
+        #  makes no sence because the app is not stopped.
     return response
 
 
