@@ -18,7 +18,7 @@ from pathlib import Path
 import src.globals as g
 import src.utils as u
 import supervisely as sly
-from fastapi import Response, HTTPException, status
+from fastapi import Response, HTTPException, status, Request
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
 
@@ -31,7 +31,14 @@ server = app.get_server()
 
 
 @server.get("/get-stats", response_class=Response)
-async def stats_endpoint(response: Response, project_id: int):
+async def stats_endpoint(request: Request, response: Response, project_id: int):
+    sly.logger.info(str(request.headers.keys()))
+
+    headers = request.headers
+    x_api_key = headers.get("x-api-key")
+
+    sly.logger.info(f"xapi: {x_api_key}")
+
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
     project = g.api.project.get_info_by_id(project_id)
     curr_tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
