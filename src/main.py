@@ -135,7 +135,8 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         file = g.api.file.get_info_by_path(
             team.id, tf_project_dir + "/class_balance.json"
         )
-        g.api.task.set_output_directory(g.TASK_ID, file.id, tf_cache_dir)
+        g.api.task.set_output_directory(g.api.task_id, file.id, tf_cache_dir)
+        sly.logger.info(f"task id: {g.api.task_id}, file id: {file.id}")
     return response
 
 

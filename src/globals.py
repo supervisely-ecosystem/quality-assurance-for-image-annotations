@@ -14,8 +14,6 @@ api = sly.Api.from_env()
 
 # TEAM_ID = sly.env.team_id()
 WORKSPACE_ID = sly.env.workspace_id()
-if sly.is_production():
-    TASK_ID = sly.env.task_id()
 
 STORAGE_DIR = sly.app.get_data_dir()
 TF_STATS_DIR = "/stats"
