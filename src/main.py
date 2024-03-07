@@ -80,7 +80,7 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
-    if g.api.file.dir_exists(team.id, project_fs_dir) is True:
+    if g.api.file.dir_exists(team.id, tf_project_dir) is True:
         u.download_stats_chunks_to_buffer(
             team.id, tf_project_dir, project_fs_dir, stats
         )
