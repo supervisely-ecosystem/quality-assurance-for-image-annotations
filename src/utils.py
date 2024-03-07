@@ -174,7 +174,10 @@ def get_updated_images_and_classes(
     images_flat = get_project_images_all(project)
 
     if force_stats_recalc is True:
-        return images_flat, []
+        for image in images_flat:
+            g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
+        g.META_CACHE[project.id] = project_meta
+        return images_flat, updated_classes
 
     if g.META_CACHE.get(project.id) is not None:
         cached_classes = g.META_CACHE[project.id].obj_classes
