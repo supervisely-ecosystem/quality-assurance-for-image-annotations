@@ -31,11 +31,11 @@ def pull_cache(
 
     if not g.api.file.dir_exists(team_id, tf_cache_dir):
         sly.logger.warning("The cache directory not exists in team files. ")
-        return False
+        return True
 
     if not g.api.file.dir_exists(team_id, curr_tf_project_dir):
         sly.logger.warning("The project directory not exists in team files.")
-        return False
+        return True
 
     g.api.file.download_directory(team_id, tf_cache_dir, local_cache_dir)
 
@@ -57,8 +57,13 @@ def pull_cache(
             g.META_CACHE = {
                 int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()
             }
+        if g.META_CACHE.get(project_id) is None:
+            sly.logger.info(
+                f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated."
+            )
+            force_stats_recalc = True
     else:
-        sly.logger.info(
+        sly.logger.warning(
             "The 'meta_cache.json' file not exists. Stats will be recalculated."
         )
         force_stats_recalc = True
@@ -70,6 +75,11 @@ def pull_cache(
             g.PROJ_IMAGES_CACHE = {
                 int(k): v for k, v in g.IMAGES_CACHE.get(str(project_id), {}).items()
             }
+        if g.META_CACHE.get(project_id) is None:
+            sly.logger.info(
+                f"The key with project ID={project_id} was not found in 'images_cache.json'. Stats will be fully recalculated."
+            )
+            force_stats_recalc = True
     else:
         sly.logger.info(
             "The 'images_cache.json' file not exists. Stats will be recalculated."

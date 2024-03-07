@@ -44,25 +44,25 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
-    project_stats = g.api.project.get_stats(project_id)
-    datasets = g.api.dataset.get_list(project_id)
 
     sly.logger.info(f"Processing for the '{project.name}' project")
     sly.logger.info(f"with the PROJECT_ID={project_id}")
     sly.logger.info(f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
     sly.logger.info(
-        f"The project consists of {project.items_count} images and has {len(datasets)} datasets"
+        f"The project consists of {project.items_count} images and has {project.datasets_count} datasets"
     )
 
     updated_images, updated_classes = u.get_updated_images_and_classes(
         project, project_meta, force_stats_recalc
     )
-
     if len(updated_images) == 0:
-        sly.logger.warn("Nothing to update. Skipping stats calculation...")
+        sly.logger.info("Nothing to update. Skipping stats calculation...")
         response.status_code = status.HTTP_200_OK
         response.body = b"Nothing to update. Skipping stats calculation..."
         return response
+
+    datasets = g.api.dataset.get_list(project_id)
+    project_stats = g.api.project.get_stats(project_id)
 
     cache = {}
     stats = [
