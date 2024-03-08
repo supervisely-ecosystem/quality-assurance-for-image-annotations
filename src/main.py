@@ -4,6 +4,8 @@ import numpy as np
 import src.globals as g
 import src.utils as u
 import supervisely as sly
+import logging
+
 from tqdm import tqdm
 import dataset_tools as dtools
 from supervisely.io.fs import (
@@ -21,7 +23,6 @@ import supervisely as sly
 from fastapi import Response, HTTPException, status, Request
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
-
 
 layout = Container(widgets=[card_1], direction="vertical")
 
@@ -144,9 +145,13 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     return response
 
 
-# TODO посмотреть для измененной аннотации почему update_at не появляется
-# if __name__ == "__main__":
-#     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
-#     u.pull_cache(tf_cache_dir)
-#     main()
-#     u.push_cache(tf_cache_dir)
+@server.get("/logs")
+async def get_logs():
+
+    sly.logger.getEffectiveLevel()
+
+    for handler in sly.logger.handlers:
+        if isinstance(handler, logging.StreamHandler):
+            log_message = handler.stream.getvalue().splitlines()
+
+    return log_message

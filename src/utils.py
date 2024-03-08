@@ -198,6 +198,8 @@ def get_updated_images_and_classes(
 
     g.META_CACHE[project.id] = project_meta
 
+    set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([image.id for image in images_flat])
+
     for image in images_flat:
         try:
             image: ImageInfo
@@ -209,11 +211,19 @@ def get_updated_images_and_classes(
             updated_images.append(image)
             g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
 
-    set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([image.id for image in images_flat])
     if set_A != set_B:
-        sly.logger.warning(
-            f"The add/delete operation was detected in the images with the following ids: {set_A.symmetric_difference(set_B)}"
-        )
+        if set_A.issubset(set_B):
+            sly.logger.warning(
+                f"The images with the following ids were added: {set_B - set_A}"
+            )
+        elif set_B.issubset(set_A):
+            sly.logger.warning(
+                f"The images with the following ids were deleted: {set_A - set_B}"
+            )
+            g.PROJ_IMAGES_CACHE = {
+                k: v for k, v in g.PROJ_IMAGES_CACHE.items() if k not in (set_A - set_B)
+            }
+
         sly.logger.info("Recalculate full statistics")
         return images_flat, []
 
