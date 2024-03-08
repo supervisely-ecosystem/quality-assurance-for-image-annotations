@@ -1,12 +1,12 @@
-from datetime import datetime
-import json, os
-import numpy as np
+import os
+
 import src.globals as g
 import src.utils as u
 import supervisely as sly
 import logging
-
-from tqdm import tqdm
+from fastapi.responses import JSONResponse
+from fastapi import Depends, BackgroundTasks
+import asyncio
 import dataset_tools as dtools
 from supervisely.io.fs import (
     get_file_name_with_ext,
@@ -16,6 +16,7 @@ from supervisely.io.fs import (
     list_files_recursively,
 )
 
+from io import StringIO
 from pathlib import Path
 import src.globals as g
 import src.utils as u
@@ -32,7 +33,7 @@ server = app.get_server()
 
 
 @server.get("/get-stats", response_class=Response)
-async def stats_endpoint(request: Request, response: Response, project_id: int):
+async def stats_endpoint(response: Response, project_id: int):
 
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
@@ -145,13 +146,78 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     return response
 
 
-@server.get("/logs")
-async def get_logs():
+log_stream = StringIO()
+sly.logger.addHandler(logging.StreamHandler(log_stream))
 
-    sly.logger.getEffectiveLevel()
 
-    for handler in sly.logger.handlers:
-        if isinstance(handler, logging.StreamHandler):
-            log_message = handler.stream.getvalue().splitlines()
+# @server.get("/log-message")
+async def log_message():
+    sly.logger.info("This is a debug log message.")
 
-    return log_message
+    log_msg = get_last_log_message()
+    return JSONResponse(content={"log_message": log_msg}, status_code=200)
+
+    # try:
+    #     sly.logger.info("This is a debug log message.")
+
+    #     log_msg = get_last_log_message()
+    #     return JSONResponse(content={"log_message": log_msg}, status_code=200)
+    # except Exception as e:
+    #     return HTTPException(detail=str(e), status_code=500)
+
+    # sly.logger.info("This is a debug log message.")
+
+    # background_tasks.add_task(check_logger_messages)
+
+    # return {"message": "Log message processed in the background"}
+
+
+# @server.get("/log-message")
+
+
+async def check_logger_messages():
+    while True:
+        # Get the last log message
+        log_messages = log_stream.getvalue()
+
+        # Process or log the messages as needed (replace this with your logic)
+        print("Background Task: Log Messages -", log_messages)
+
+        # Sleep for a while before checking again
+        await asyncio.sleep(2)  # Adjust the sleep interval as needed
+
+
+# def get_last_log_message():
+#     log_messages = log_stream.getvalue()
+#     log_stream.truncate(0)
+#     log_stream.seek(0)
+
+#     return log_messages.strip()
+
+
+# Start the background task
+@server.on_event("startup")
+async def startup_event():
+    asyncio.create_task(check_logger_messages())
+
+
+# from fastapi import FastAPI
+
+# # app = FastAPI()
+# import asyncio
+# from time import sleep
+
+
+# async def fake_async_sleep(seconds):
+#     await asyncio.sleep(seconds)
+
+
+# @server.get("/endpoint1")
+# async def read_endpoint1():
+#     await fake_async_sleep(100)
+#     return {"message": "Hello from Endpoint 1"}
+
+
+# @server.get("/endpoint2")
+# async def read_endpoint2():
+#     return {"message": "Hello from Endpoint 2"}
