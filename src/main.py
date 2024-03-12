@@ -30,6 +30,8 @@ static_dir = Path(g.STORAGE_DIR)
 app = sly.Application(layout=layout, static_dir=static_dir)
 server = app.get_server()
 
+os.environ["ENV"] = "production"
+
 
 @server.get("/get-stats", response_class=Response)
 async def stats_endpoint(request: Request, response: Response, project_id: int):
