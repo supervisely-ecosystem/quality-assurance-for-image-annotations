@@ -311,7 +311,11 @@ def remove_junk(project, datasets, files_fs):
         )
 
 
-def download_stats_chunks_to_buffer(team_id, tf_project_dir, project_fs_dir, stats):
+def download_stats_chunks_to_buffer(
+    team_id, tf_project_dir, project_fs_dir, stats, force_stats_recalc
+) -> bool:
+    if force_stats_recalc:
+        return True
     total_size = sum(
         [
             g.api.file.get_directory_size(
@@ -327,12 +331,20 @@ def download_stats_chunks_to_buffer(team_id, tf_project_dir, project_fs_dir, sta
         unit_scale=True,
     ) as pbar:
         for stat in stats:
-            g.api.file.download_directory(
-                team_id,
-                f"{tf_project_dir}/{stat.basename_stem}",
-                f"{project_fs_dir}/{stat.basename_stem}",
-                pbar,
-            )
+            try:
+                g.api.file.download_directory(
+                    team_id,
+                    f"{tf_project_dir}/{stat.basename_stem}",
+                    f"{project_fs_dir}/{stat.basename_stem}",
+                    pbar,
+                )
+            except:
+                sly.logger.warning(
+                    "The integrity of the team files is broken. Recalculating full stats."
+                )
+                pbar.close()
+                return True
+    return False
 
 
 def calculate_and_save_stats(
@@ -421,34 +433,40 @@ def delete_old_chunks(team_id):
 
 
 def sew_chunks_to_json_and_upload_chunks(
-    team_id, stats, curr_projectfs_dir, curr_tf_project_dir, updated_classes
+    team_id, stats, project_fs_dir, tf_project_dir, updated_classes
 ):
     for stat in stats:
         stat.sew_chunks(
-            chunks_dir=f"{curr_projectfs_dir}/{stat.basename_stem}/",
+            chunks_dir=f"{project_fs_dir}/{stat.basename_stem}/",
             updated_classes=updated_classes,
         )
         if stat.to_json() is not None:
             with open(
-                f"{curr_projectfs_dir}/{stat.basename_stem}.json", "w", encoding="utf-8"
+                f"{project_fs_dir}/{stat.basename_stem}.json", "w", encoding="utf-8"
             ) as f:
                 json.dump(stat.to_json(), f)
 
-        stat.to_image(f"{curr_projectfs_dir}/{stat.basename_stem}.png")
+        stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png")
 
         npy_paths = list_files(
-            f"{curr_projectfs_dir}/{stat.basename_stem}", valid_extensions=[".npy"]
+            f"{project_fs_dir}/{stat.basename_stem}", valid_extensions=[".npy"]
         )
         dst_npy_paths = [
-            f"{curr_tf_project_dir}/{stat.basename_stem}/{get_file_name_with_ext(path)}"
+            f"{tf_project_dir}/{stat.basename_stem}/{get_file_name_with_ext(path)}"
             for path in npy_paths
         ]
 
+        try:
+            g.api.file.remove_dir(team_id, f"{tf_project_dir}/{stat.basename_stem}")
+            sly.logger.info(
+                f"The old team files path '{tf_project_dir}/{stat.basename_stem}' is removed"
+            )
+        except ValueError:
+            pass
+
         with tqdm(
             desc=f"Uploading {stat.basename_stem} chunks",
-            total=sly.fs.get_directory_size(
-                f"{curr_projectfs_dir}/{stat.basename_stem}"
-            ),
+            total=sly.fs.get_directory_size(f"{project_fs_dir}/{stat.basename_stem}"),
             unit="B",
             unit_scale=True,
         ) as pbar:

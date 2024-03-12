@@ -53,15 +53,6 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         f"The project consists of {project.items_count} images and has {project.datasets_count} datasets"
     )
 
-    updated_images, updated_classes = u.get_updated_images_and_classes(
-        project, project_meta, force_stats_recalc
-    )
-    if len(updated_images) == 0:
-        sly.logger.info("Nothing to update. Skipping stats calculation...")
-        response.status_code = status.HTTP_200_OK
-        response.body = b"Nothing to update. Skipping stats calculation..."
-        return response
-
     datasets = g.api.dataset.get_list(project_id)
     project_stats = g.api.project.get_stats(project_id)
 
@@ -82,9 +73,18 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     os.makedirs(project_fs_dir, exist_ok=True)
 
     if g.api.file.dir_exists(team.id, tf_project_dir) is True:
-        u.download_stats_chunks_to_buffer(
-            team.id, tf_project_dir, project_fs_dir, stats
+        force_stats_recalc = u.download_stats_chunks_to_buffer(
+            team.id, tf_project_dir, project_fs_dir, stats, force_stats_recalc
         )
+
+    updated_images, updated_classes = u.get_updated_images_and_classes(
+        project, project_meta, force_stats_recalc
+    )
+    if len(updated_images) == 0:
+        sly.logger.info("Nothing to update. Skipping stats calculation...")
+        response.status_code = status.HTTP_200_OK
+        response.body = b"Nothing to update. Skipping stats calculation..."
+        return response
 
     files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
     u.check_datasets_consistency(project, datasets, files_fs, len(stats))
@@ -98,20 +98,6 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     tf_all_paths = [
         info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
     ]
-
-    # unique_batch_sizes = set(
-    #     [
-    #         get_file_name(path).split("_")[-2]
-    #         for path in tf_all_paths
-    #         if path.endswith(".npy")
-    #     ]
-    # )
-
-    # if (len(unique_batch_sizes) > 1) or (str(g.CHUNK_SIZE) not in unique_batch_sizes):
-    #     g.TF_OLD_CHUNKS += [path for path in tf_all_paths if path.endswith(".npy")]
-    #     sly.logger.info(
-    #         "Chunk batch sizes in team files are non-unique. All chunks will be removed."
-    #     )
 
     sly.logger.info(f"Start calculating stats for {len(updated_images)} images")
     u.calculate_and_save_stats(
