@@ -31,9 +31,17 @@ static_dir = Path(g.STORAGE_DIR)
 app = sly.Application(layout=layout, static_dir=static_dir)
 server = app.get_server()
 
+# Global variable for asynchronous interruption
+interrupt_get_stats = asyncio.Event()
+
+lock = asyncio.Lock()
+
 
 @server.get("/get-stats", response_class=Response)
-async def stats_endpoint(response: Response, project_id: int):
+async def stats_endpoint(
+    response: Response, project_id: int, background_tasks: BackgroundTasks
+):
+    background_tasks.add_task(write_log_message, "Interrupting get-stats endpoint")
 
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
@@ -42,7 +50,10 @@ async def stats_endpoint(response: Response, project_id: int):
     tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
 
     g.initialize_global_cache()
-    force_stats_recalc = u.pull_cache(team.id, project_id, tf_cache_dir, tf_project_dir)
+    async with lock:
+        force_stats_recalc = await u.pull_cache(
+            team.id, project_id, tf_cache_dir, tf_project_dir
+        )
 
     json_project_meta = g.api.project.get_meta(project_id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
@@ -54,9 +65,10 @@ async def stats_endpoint(response: Response, project_id: int):
         f"The project consists of {project.items_count} images and has {project.datasets_count} datasets"
     )
 
-    updated_images, updated_classes = u.get_updated_images_and_classes(
-        project, project_meta, force_stats_recalc
-    )
+    async with lock:
+        updated_images, updated_classes = await u.get_updated_images_and_classes(
+            project, project_meta, force_stats_recalc
+        )
     if len(updated_images) == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
         response.status_code = status.HTTP_200_OK
@@ -83,56 +95,57 @@ async def stats_endpoint(response: Response, project_id: int):
     os.makedirs(project_fs_dir, exist_ok=True)
 
     if g.api.file.dir_exists(team.id, tf_project_dir) is True:
-        u.download_stats_chunks_to_buffer(
-            team.id, tf_project_dir, project_fs_dir, stats
-        )
+        async with lock:
+            await u.download_stats_chunks_to_buffer(
+                team.id, tf_project_dir, project_fs_dir, stats
+            )
+
+    # Check for interruption signal
+    if interrupt_get_stats.is_set():
+        response.body = b"Stats calculation interrupted."
+        response.status_code = status.HTTP_200_OK
+        return response
 
     files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
-    u.check_datasets_consistency(project, datasets, files_fs, len(stats))
-    u.remove_junk(project, datasets, files_fs)
+    async with lock:
+        await u.check_datasets_consistency(project, datasets, files_fs, len(stats))
+    async with lock:
+        await u.remove_junk(project, datasets, files_fs)
 
-    idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
-    updated_images = u.check_idxs_integrity(
-        project, stats, project_fs_dir, idx_to_infos, updated_images
-    )
+    idx_to_infos, infos_to_idx = await u.get_indexes_dct(project_id, datasets)
+    async with lock:
+        updated_images = await u.check_idxs_integrity(
+            project, stats, project_fs_dir, idx_to_infos, updated_images
+        )
 
     tf_all_paths = [
         info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
     ]
 
-    # unique_batch_sizes = set(
-    #     [
-    #         get_file_name(path).split("_")[-2]
-    #         for path in tf_all_paths
-    #         if path.endswith(".npy")
-    #     ]
-    # )
-
-    # if (len(unique_batch_sizes) > 1) or (str(g.CHUNK_SIZE) not in unique_batch_sizes):
-    #     g.TF_OLD_CHUNKS += [path for path in tf_all_paths if path.endswith(".npy")]
-    #     sly.logger.info(
-    #         "Chunk batch sizes in team files are non-unique. All chunks will be removed."
-    #     )
-
     sly.logger.info(f"Start calculating stats for {len(updated_images)} images")
-    u.calculate_and_save_stats(
-        datasets,
-        project_meta,
-        updated_images,
-        stats,
-        tf_all_paths,
-        project_fs_dir,
-        idx_to_infos,
-        infos_to_idx,
-    )
+    async with lock:
+        await u.calculate_and_save_stats(
+            datasets,
+            project_meta,
+            updated_images,
+            stats,
+            tf_all_paths,
+            project_fs_dir,
+            idx_to_infos,
+            infos_to_idx,
+        )
 
-    u.delete_old_chunks(team.id)
-    u.sew_chunks_to_json_and_upload_chunks(
-        team.id, stats, project_fs_dir, tf_project_dir, updated_classes
-    )
-    u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
+    async with lock:
+        await u.delete_old_chunks(team.id)
+    async with lock:
+        await u.sew_chunks_to_json_and_upload_chunks(
+            team.id, stats, project_fs_dir, tf_project_dir, updated_classes
+        )
+    async with lock:
+        await u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
-    u.push_cache(team.id, project_id, tf_cache_dir)
+    async with lock:
+        await u.push_cache(team.id, project_id, tf_cache_dir)
 
     response.body = f"The stats for {len(updated_images)} images were calculated."
     response.status_code = status.HTTP_200_OK
@@ -150,74 +163,31 @@ log_stream = StringIO()
 sly.logger.addHandler(logging.StreamHandler(log_stream))
 
 
-# @server.get("/log-message")
-async def log_message():
-    sly.logger.info("This is a debug log message.")
-
-    log_msg = get_last_log_message()
-    return JSONResponse(content={"log_message": log_msg}, status_code=200)
-
-    # try:
-    #     sly.logger.info("This is a debug log message.")
-
-    #     log_msg = get_last_log_message()
-    #     return JSONResponse(content={"log_message": log_msg}, status_code=200)
-    # except Exception as e:
-    #     return HTTPException(detail=str(e), status_code=500)
-
-    # sly.logger.info("This is a debug log message.")
-
-    # background_tasks.add_task(check_logger_messages)
-
-    # return {"message": "Log message processed in the background"}
+@server.post("/log-message")
+async def log_message(background_tasks: BackgroundTasks, message: str):
+    background_tasks.add_task(write_log_message, message)
+    return {"message": "Log message received"}
 
 
-# @server.get("/log-message")
+async def write_log_message(message: str):
+    sly.logger.info(message)
 
 
-async def check_logger_messages():
-    while True:
-        # Get the last log message
-        log_messages = log_stream.getvalue()
-
-        # Process or log the messages as needed (replace this with your logic)
-        print("Background Task: Log Messages -", log_messages)
-
-        # Sleep for a while before checking again
-        await asyncio.sleep(2)  # Adjust the sleep interval as needed
-
-
-# def get_last_log_message():
-#     log_messages = log_stream.getvalue()
-#     log_stream.truncate(0)
-#     log_stream.seek(0)
-
-#     return log_messages.strip()
+@server.get("/long_process")
+async def long_process():
+    print("Long process started")
+    for i in range(10):
+        async with lock:
+            await asyncio.sleep(1)
+            print(f"Long process: {i+1} second(s) passed")
+    print("Long process finished")
+    return {"message": "Long process finished"}
 
 
-# Start the background task
-@server.on_event("startup")
-async def startup_event():
-    asyncio.create_task(check_logger_messages())
-
-
-# from fastapi import FastAPI
-
-# # app = FastAPI()
-# import asyncio
-# from time import sleep
-
-
-# async def fake_async_sleep(seconds):
-#     await asyncio.sleep(seconds)
-
-
-# @server.get("/endpoint1")
-# async def read_endpoint1():
-#     await fake_async_sleep(100)
-#     return {"message": "Hello from Endpoint 1"}
-
-
-# @server.get("/endpoint2")
-# async def read_endpoint2():
-#     return {"message": "Hello from Endpoint 2"}
+@server.get("/interrupt")
+async def interrupt():
+    print("Interrupt started")
+    async with lock:
+        await asyncio.sleep(2)
+        print("Interrupt finished")
+    return {"message": "Interrupt finished"}
