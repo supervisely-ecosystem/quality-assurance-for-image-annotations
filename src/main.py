@@ -34,6 +34,8 @@ server = app.get_server()
 @server.get("/get-stats", response_class=Response)
 async def stats_endpoint(request: Request, response: Response, project_id: int):
 
+    sly.logger.info("This is check_sdk_branch")
+
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
 
