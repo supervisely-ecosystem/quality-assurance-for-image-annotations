@@ -1,4 +1,4 @@
 # supervisely==6.73.34
-git+https://github.com/supervisely/supervisely.git@tqdm_sly_download
+git+https://github.com/supervisely/supervisely.git@tqdm_fix_empty_progressbar_prod
 # git+https://github.com/supervisely/dataset-tools.git@quality-app
 dataset-tools==0.0.43
