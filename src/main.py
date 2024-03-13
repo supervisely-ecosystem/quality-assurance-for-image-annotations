@@ -5,7 +5,7 @@ import src.globals as g
 import src.utils as u
 import supervisely as sly
 import logging
-
+from queue import Queue
 from tqdm import tqdm
 import dataset_tools as dtools
 from supervisely.io.fs import (
@@ -15,7 +15,8 @@ from supervisely.io.fs import (
     get_file_size,
     list_files_recursively,
 )
-
+import asyncio
+import threading
 from pathlib import Path
 import src.globals as g
 import src.utils as u
@@ -24,6 +25,7 @@ from fastapi import Response, HTTPException, status, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
+from functools import partial
 
 layout = Container(widgets=[card_1], direction="vertical")
 
@@ -35,10 +37,49 @@ log_file_path = static_dir.joinpath("logfile.log")
 sly.fs.silent_remove(log_file_path)
 file_handler = logging.FileHandler(log_file_path, mode="a")
 sly.add_logger_handler(sly.logger, file_handler)
+# result_queue = asyncio.Queue()
+
+
+class StatsThread(threading.Thread):
+    def __init__(self, response, project_id):
+        super(StatsThread, self).__init__()
+        self.response = response
+        self.project_id = project_id
+        self.result = None
+
+    def run(self):
+        # Call your function and store the result
+        self.result = _stats_endpoint(
+            response=self.response, project_id=self.project_id
+        )
 
 
 @server.get("/get-stats", response_class=Response)
-async def stats_endpoint(request: Request, response: Response, project_id: int):
+async def stats_endpoint(response: Response, project_id: int):
+    # loop = asyncio.get_event_loop()
+    # # Wrap the _stats_endpoint function in a future and await it
+    # await loop.run_in_executor(None, _stats_endpoint, response, project_id)
+
+    # return await result_queue.get()
+
+    # return returned_value
+    threading.Thread(
+        target=_stats_endpoint, kwargs={"response": response, "project_id": project_id}
+    ).start()
+
+    # stats_thread = StatsThread(response=response, project_id=project_id)
+
+    # stats_thread.start()
+    # # Wait for the thread to finish
+    # stats_thread.join()
+
+    return "The running thread was started"
+
+
+# return await result_queue.get()
+
+
+def _stats_endpoint(response, project_id):
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
 
@@ -89,6 +130,7 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         sly.logger.info("Nothing to update. Skipping stats calculation...")
         response.status_code = status.HTTP_200_OK
         response.body = b"Nothing to update. Skipping stats calculation..."
+        # result_queue.put(response)
         return response
 
     files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
@@ -133,13 +175,14 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         g.api.task.set_output_directory(g.api.task_id, file.id, tf_cache_dir)
         # sly.logger.info(f"task id: {g.api.task_id}, file id: {file.id}")
         #  makes no sence because the app is not stopped.
+    # result_queue.put(response)
     return response
 
 
 @server.get("/logs")
 async def get_logs():
 
-    sly.logger.info("this is a debug message")
+    # sly.logger.info("this is a debug message")
 
     for handler in sly.logger.handlers:
         if isinstance(handler, logging.FileHandler):
