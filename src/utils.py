@@ -20,7 +20,7 @@ from supervisely.io.fs import (
 )
 
 
-async def pull_cache(
+def pull_cache(
     team_id: int, project_id: int, tf_cache_dir: str, curr_tf_project_dir: str
 ) -> bool:
     force_stats_recalc = False
@@ -97,7 +97,7 @@ def get_iso_timestamp():
     return str(dt.isoformat()) + "Z"
 
 
-async def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
+def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     os.makedirs(local_cache_dir, exist_ok=True)
 
@@ -161,7 +161,7 @@ def get_project_images_all(project_info: ProjectInfo) -> List[ImageInfo]:
     return images_flat
 
 
-async def get_updated_images_and_classes(
+def get_updated_images_and_classes(
     project: ProjectInfo,
     project_meta: ProjectMeta,
     force_stats_recalc: bool,
@@ -234,9 +234,7 @@ async def get_updated_images_and_classes(
     return updated_images, updated_classes
 
 
-async def get_indexes_dct(
-    project_id: id, datasets: List[DatasetInfo]
-) -> Tuple[dict, dict]:
+def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, dict]:
     chunk_to_images, image_to_chunk = {}, {}
 
     for dataset in datasets:
@@ -252,7 +250,7 @@ async def get_indexes_dct(
     return chunk_to_images, image_to_chunk
 
 
-async def check_idxs_integrity(
+def check_idxs_integrity(
     project, stats, curr_projectfs_dir, idx_to_infos, updated_images
 ) -> list:
     if sly.fs.dir_empty(curr_projectfs_dir):
@@ -278,7 +276,7 @@ async def check_idxs_integrity(
     return updated_images
 
 
-async def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
+def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
     for dataset in datasets:
         actual_ceil = math.ceil(dataset.items_count / g.CHUNK_SIZE)
         max_chunks = math.ceil(
@@ -298,7 +296,7 @@ async def check_datasets_consistency(project_info, datasets, npy_paths, num_stat
     sly.logger.info("The consistency of data is OK")
 
 
-async def remove_junk(project, datasets, files_fs):
+def remove_junk(project, datasets, files_fs):
     ds_ids, rm_cnt = [str(dataset.id) for dataset in datasets], 0
     for path in files_fs:
         if (path.split("_")[-4] not in ds_ids) or (
@@ -313,9 +311,7 @@ async def remove_junk(project, datasets, files_fs):
         )
 
 
-async def download_stats_chunks_to_buffer(
-    team_id, tf_project_dir, project_fs_dir, stats
-):
+def download_stats_chunks_to_buffer(team_id, tf_project_dir, project_fs_dir, stats):
     total_size = sum(
         [
             g.api.file.get_directory_size(
@@ -339,7 +335,7 @@ async def download_stats_chunks_to_buffer(
             )
 
 
-async def calculate_and_save_stats(
+def calculate_and_save_stats(
     datasets,
     project_meta,
     updated_images,
@@ -410,7 +406,7 @@ async def calculate_and_save_stats(
                     stat.clean()
 
 
-async def delete_old_chunks(team_id):
+def delete_old_chunks(team_id):
     if len(g.TF_OLD_CHUNKS) > 0:
         with tqdm(
             desc=f"Deleting old chunks in team files",
@@ -424,7 +420,7 @@ async def delete_old_chunks(team_id):
         g.TF_OLD_CHUNKS = []
 
 
-async def sew_chunks_to_json_and_upload_chunks(
+def sew_chunks_to_json_and_upload_chunks(
     team_id, stats, curr_projectfs_dir, curr_tf_project_dir, updated_classes
 ):
     for stat in stats:
@@ -463,7 +459,7 @@ async def sew_chunks_to_json_and_upload_chunks(
         )
 
 
-async def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
+def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
     remove_files_with_null(curr_projectfs_dir)
     json_paths = list_files(curr_projectfs_dir, valid_extensions=[".json"])
     dst_json_paths = [
