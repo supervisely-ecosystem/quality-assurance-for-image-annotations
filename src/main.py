@@ -5,6 +5,7 @@ import src.globals as g
 import src.utils as u
 import supervisely as sly
 import logging
+import time
 
 from tqdm import tqdm
 import dataset_tools as dtools
@@ -37,6 +38,13 @@ os.environ["ENV"] = "production"
 async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     sly.logger.info("This is check_sdk_branch")
+
+    iterable = range(10)
+
+    # Wrap the iterable with tqdm
+    for item in tqdm(iterable, desc="Processing"):
+        # Simulate some work being done
+        time.sleep(0.1)
 
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
