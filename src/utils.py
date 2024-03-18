@@ -3,7 +3,7 @@ import os
 import math
 from typing import List, Literal, Optional, Dict, Tuple
 from datetime import datetime
-
+import humanize
 from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo
 
 from tqdm import tqdm
@@ -464,13 +464,10 @@ def sew_chunks_to_json_and_upload_chunks(
         except ValueError:
             pass
 
-        with tqdm(
-            desc=f"Uploading {stat.basename_stem} chunks",
-            total=sly.fs.get_directory_size(f"{project_fs_dir}/{stat.basename_stem}"),
-            unit="B",
-            unit_scale=True,
-        ) as pbar:
-            g.api.file.upload_bulk(team_id, npy_paths, dst_npy_paths, pbar)
+        sizeb = sly.fs.get_directory_size(f"{project_fs_dir}/{stat.basename_stem}")
+        size = humanize.naturalsize(sizeb)
+        sly.logger.info(f"Uploading {stat.basename_stem} chunks: {size}")
+        g.api.file.upload_bulk(team_id, npy_paths, dst_npy_paths)
 
         sly.logger.info(
             f"{stat.basename_stem}: {len(npy_paths)} chunks succesfully uploaded"
