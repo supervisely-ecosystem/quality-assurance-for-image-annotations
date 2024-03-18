@@ -60,11 +60,11 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     stats = [
         dtools.ClassBalance(project_meta, project_stats, stat_cache=cache),
         dtools.ClassCooccurrence(project_meta),
-        # dtools.ClassesPerImage(project_meta, project_stats, datasets, stat_cache=cache),
-        # dtools.ObjectsDistribution(project_meta),
-        # dtools.ObjectSizes(project_meta, project_stats),
-        # dtools.ClassSizes(project_meta),
-        # dtools.ClassesTreemap(project_meta),
+        dtools.ClassesPerImage(project_meta, project_stats, datasets, stat_cache=cache),
+        dtools.ObjectsDistribution(project_meta),
+        dtools.ObjectSizes(project_meta, project_stats),
+        dtools.ClassSizes(project_meta),
+        dtools.ClassesTreemap(project_meta),
     ]
 
     project_fs_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
@@ -128,15 +128,3 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         # sly.logger.info(f"task id: {g.api.task_id}, file id: {file.id}")
         #  makes no sence because the app is not stopped.
     return response
-
-
-@server.get("/logs")
-async def get_logs():
-
-    sly.logger.getEffectiveLevel()
-
-    for handler in sly.logger.handlers:
-        if isinstance(handler, logging.StreamHandler):
-            log_message = handler.stream.getvalue().splitlines()
-
-    return log_message

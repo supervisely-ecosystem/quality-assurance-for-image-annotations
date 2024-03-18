@@ -5,7 +5,7 @@ from typing import List, Literal, Optional, Dict, Tuple
 from datetime import datetime
 import humanize
 from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo
-
+from itertools import groupby
 from tqdm import tqdm
 import supervisely as sly
 import src.globals as g
@@ -358,6 +358,8 @@ def calculate_and_save_stats(
     image_to_chunk,
 ):
     with tqdm(desc="Calculating stats", total=len(updated_images)) as pbar:
+
+        info = {info.id: info for info in updated_images}
         for dataset in datasets:
             # ds_updated_images = [
             #     image for image in updated_images if image.dataset_id == dataset.id
@@ -368,12 +370,23 @@ def calculate_and_save_stats(
 
             figures = get_figures_list(dataset.id)
 
-            for fig_batch in sly.batched(figures, 100):
-                for stat in stats:
-                    stat.update2(fig_batch)
-                pbar.update(len(fig_batch))
+            figures.sort(key=lambda x: x.entity_id)
+
+            grouped = {}
+            for key, group in groupby(figures, key=lambda x: x.entity_id):
+                grouped[key] = list(group)
+
+            for batch in sly.batched(list(grouped.keys()), 500):
+                for image_id in batch:
+                    for stat in stats:
+                        stat.update2(info[image_id], grouped[image_id])
+                pbar.update(len(batch))
+
+        if pbar.last_print_n < pbar.total:  # unlabeled images
+            pbar.update(pbar.total - pbar.n)
 
         for stat in stats:
+            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png")
             res = stat.to_json2()
             if res is not None:
                 with open(
