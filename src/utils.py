@@ -353,69 +353,119 @@ def calculate_and_save_stats(
     updated_images,
     stats,
     tf_all_paths,
-    curr_projectfs_dir,
+    project_fs_dir,
     chunk_to_images,
     image_to_chunk,
 ):
     with tqdm(desc="Calculating stats", total=len(updated_images)) as pbar:
         for dataset in datasets:
-            ds_updated_images = [
-                image for image in updated_images if image.dataset_id == dataset.id
-            ]
-            updated_chunks = list(
-                set([image_to_chunk[image.id] for image in ds_updated_images])
-            )
+            # ds_updated_images = [
+            #     image for image in updated_images if image.dataset_id == dataset.id
+            # ]
+            # updated_chunks = list(
+            #     set([image_to_chunk[image.id] for image in ds_updated_images])
+            # )
 
-            for chunk in updated_chunks:
-                images_batch = chunk_to_images[chunk]
-                image_ids = [image.id for image in images_batch]
-                datetime_objects = [
-                    datetime.fromisoformat(timestamp[:-1])
-                    for timestamp in [image.updated_at for image in images_batch]
-                ]
-                latest_datetime = sorted(datetime_objects, reverse=True)[0]
+            figures = get_figures_list(dataset.id)
 
-                janns = g.api.annotation.download_json_batch(dataset.id, image_ids)
-                anns = [
-                    sly.Annotation.from_json(ann_json, project_meta)
-                    for ann_json in janns
-                ]
-
-                for img, ann in zip(images_batch, anns):
-                    for stat in stats:
-                        stat.update(img, ann)
-                    pbar.update(1)
-
+            for fig_batch in sly.batched(figures, 100):
                 for stat in stats:
-                    savedir = f"{curr_projectfs_dir}/{stat.basename_stem}"
-                    os.makedirs(savedir, exist_ok=True)
+                    stat.update2(fig_batch)
+                pbar.update(len(fig_batch))
 
-                    tf_stat_chunks = [
-                        path
-                        for path in tf_all_paths
-                        if (stat.basename_stem in path) and (chunk in path)
-                    ]
+        for stat in stats:
+            res = stat.to_json2()
+            if res is not None:
+                with open(
+                    f"{project_fs_dir}/{stat.basename_stem}.json",
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    json.dump(res, f)
 
-                    if len(tf_stat_chunks) > 0:
-                        timestamps = [
-                            get_file_name(path).split("_")[-1]
-                            for path in tf_stat_chunks
-                        ]
-                        datetime_objects = [
-                            datetime.fromisoformat(timestamp)
-                            for timestamp in timestamps
-                        ]
-                        if latest_datetime > sorted(datetime_objects, reverse=True)[0]:
-                            g.TF_OLD_CHUNKS += tf_stat_chunks
-                            for path in list_files(savedir, [".npy"]):
-                                if chunk in path:
-                                    os.remove(path)
+                # for chunk in updated_chunks:
+                #     images_batch = chunk_to_images[chunk]
+                #     image_ids = [image.id for image in images_batch]
+                #     datetime_objects = [
+                #         datetime.fromisoformat(timestamp[:-1])
+                #         for timestamp in [image.updated_at for image in images_batch]
+                #     ]
+                #     latest_datetime = sorted(datetime_objects, reverse=True)[0]
 
-                    np.save(
-                        f"{savedir}/{chunk}_{g.CHUNK_SIZE}_{latest_datetime.isoformat()}.npy",
-                        stat.to_numpy_raw(),
-                    )
-                    stat.clean()
+                #     janns = g.api.annotation.download_json_batch(dataset.id, image_ids)
+                #     anns = [
+                #         sly.Annotation.from_json(ann_json, project_meta)
+                #         for ann_json in janns
+                #     ]
+
+                #     for img, ann in zip(images_batch, anns):
+                #         for stat in stats:
+                #             stat.update(img, ann)
+                #         pbar.update(1)
+
+                # for stat in stats:
+                #     savedir = f"{curr_projectfs_dir}/{stat.basename_stem}"
+                #     os.makedirs(savedir, exist_ok=True)
+
+                #     tf_stat_chunks = [
+                #         path
+                #         for path in tf_all_paths
+                #         if (stat.basename_stem in path) and (chunk in path)
+                #     ]
+
+                #     if len(tf_stat_chunks) > 0:
+                #         timestamps = [
+                #             get_file_name(path).split("_")[-1]
+                #             for path in tf_stat_chunks
+                #         ]
+                #         datetime_objects = [
+                #             datetime.fromisoformat(timestamp)
+                #             for timestamp in timestamps
+                #         ]
+                #         if latest_datetime > sorted(datetime_objects, reverse=True)[0]:
+                #             g.TF_OLD_CHUNKS += tf_stat_chunks
+                #             for path in list_files(savedir, [".npy"]):
+                #                 if chunk in path:
+                #                     os.remove(path)
+
+                #     np.save(
+                #         f"{savedir}/{chunk}_{g.CHUNK_SIZE}_{latest_datetime.isoformat()}.npy",
+                #         stat.to_numpy_raw(),
+                #     )
+                #     stat.clean()
+
+
+def get_figures_list(dataset_id):
+    fields = [
+        "id",
+        "createdAt",
+        "updatedAt",
+        "imageId",
+        "priority",
+        "objectId",
+        "classId",
+        "projectId",
+        "datasetId",
+        # "geometry",
+        "meta",
+        "area",
+        "realArea",
+        "tool",
+        "instanceId",
+        "geometryType",
+        "description",
+        "createdBy",
+    ]
+    figures_infos = g.api.image.figure.get_list_all_pages(
+        "figures.list",
+        {
+            # ApiField.DATASET_ID: dataset_id,
+            # ApiField.FIELDS: fields,
+            "datasetId": dataset_id,
+            "fields": fields,
+        },
+    )
+    return figures_infos
 
 
 def delete_old_chunks(team_id):

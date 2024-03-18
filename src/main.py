@@ -60,11 +60,11 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     stats = [
         dtools.ClassBalance(project_meta, project_stats, stat_cache=cache),
         dtools.ClassCooccurrence(project_meta),
-        dtools.ClassesPerImage(project_meta, project_stats, datasets, stat_cache=cache),
-        dtools.ObjectsDistribution(project_meta),
-        dtools.ObjectSizes(project_meta, project_stats),
-        dtools.ClassSizes(project_meta),
-        dtools.ClassesTreemap(project_meta),
+        # dtools.ClassesPerImage(project_meta, project_stats, datasets, stat_cache=cache),
+        # dtools.ObjectsDistribution(project_meta),
+        # dtools.ObjectSizes(project_meta, project_stats),
+        # dtools.ClassSizes(project_meta),
+        # dtools.ClassesTreemap(project_meta),
     ]
 
     project_fs_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
@@ -110,10 +110,10 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         infos_to_idx,
     )
 
-    u.delete_old_chunks(team.id)
-    u.sew_chunks_to_json_and_upload_chunks(
-        team.id, stats, project_fs_dir, tf_project_dir, updated_classes
-    )
+    # u.delete_old_chunks(team.id)
+    # u.sew_chunks_to_json_and_upload_chunks(
+    #     team.id, stats, project_fs_dir, tf_project_dir, updated_classes
+    # )
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
     u.push_cache(team.id, project_id, tf_cache_dir)
