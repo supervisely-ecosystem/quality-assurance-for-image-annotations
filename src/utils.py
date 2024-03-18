@@ -238,7 +238,7 @@ def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, 
     chunk_to_images, image_to_chunk = {}, {}
 
     for dataset in datasets:
-        images_all = g.api.image.get_list(dataset.id)
+        images_all = g.api.image.get_list(dataset.id)  # TODO optimie speed
         images_all = sorted(images_all, key=lambda x: x.id)
 
         for idx, image_batch in enumerate(sly.batched(images_all, g.CHUNK_SIZE)):

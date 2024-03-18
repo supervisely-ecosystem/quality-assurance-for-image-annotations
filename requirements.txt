@@ -1,3 +1,5 @@
-supervisely==6.73.34
+# supervisely==6.73.34
+supervisely
 # git+https://github.com/supervisely/dataset-tools.git@quality-app
-dataset-tools==0.0.43
+# dataset-tools==0.0.43
+dataset-tools
