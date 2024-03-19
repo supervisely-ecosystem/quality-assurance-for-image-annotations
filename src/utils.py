@@ -154,30 +154,33 @@ def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
     sly.logger.info("The cache was pushed to team files")
 
 
-def get_project_images_all(project_info: ProjectInfo) -> List[ImageInfo]:
-    images_flat = []
-    for dataset in g.api.dataset.get_list(project_info.id):
-        images_flat += g.api.image.get_list(dataset.id)
-    return images_flat
+def get_project_images_all(
+    project_info: ProjectInfo, datasets: List[DatasetInfo]
+) -> List[ImageInfo]:
+    return {d.id: g.api.image.get_list(d.id) for d in datasets}
 
 
 def get_updated_images_and_classes(
     project: ProjectInfo,
     project_meta: ProjectMeta,
+    datasets: List[DatasetInfo],
     force_stats_recalc: bool,
 ) -> Tuple[List[ImageInfo], List[str]]:
-    updated_images, updated_classes = [], []
+    updated_images, updated_classes = {d.id: [] for d in datasets}, []
     if len(project_meta.obj_classes.items()) == 0:
         sly.logger.info("The project is fully unlabeled")
-        return updated_images, updated_classes
+        return {}, []
 
-    images_flat = get_project_images_all(project)
+    images_all_dct = get_project_images_all(project, datasets)
+    images_all_flat = []
+    for value in images_all_dct.values():
+        images_all_flat.extend(value)
 
     if force_stats_recalc is True:
-        for image in images_flat:
+        for image in images_all_flat:
             g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
         g.META_CACHE[project.id] = project_meta
-        return images_flat, updated_classes
+        return images_all_dct, updated_classes
 
     if g.META_CACHE.get(project.id) is not None:
         cached_classes = g.META_CACHE[project.id].obj_classes
@@ -190,25 +193,20 @@ def get_updated_images_and_classes(
             sly.logger.info(
                 f"Changes in the number of classes detected: {updated_classes}"
             )
-            # sly.logger.warning(
-            #     "Changes in the number of classes detected. Recalculate full stats... "  # TODO
-            # )
-            # g.META_CACHE[project.id] = project_meta
-            # return images_flat
 
     g.META_CACHE[project.id] = project_meta
 
-    set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([image.id for image in images_flat])
+    set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([i.id for i in images_all_flat])
 
-    for image in images_flat:
+    for image in images_all_flat:
         try:
             image: ImageInfo
             cached_updated_at = g.PROJ_IMAGES_CACHE[image.id]
             if image.updated_at != cached_updated_at:
-                updated_images.append(image)
+                updated_images[image.dataset_id].append(image)
                 g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
         except KeyError:
-            updated_images.append(image)
+            updated_images[image.dataset_id].append(image)
             g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
 
     if set_A != set_B:
@@ -225,12 +223,13 @@ def get_updated_images_and_classes(
             }
 
         sly.logger.info("Recalculate full statistics")
-        return images_flat, []
+        return images_all_dct, []
 
-    if len(updated_images) == project.items_count:
+    num_updated = len(list(updated_images.values()))
+    if num_updated == project.items_count:
         sly.logger.info(f"Full dataset statistics will be calculated.")
-    elif len(updated_images) > 0:
-        sly.logger.info(f"The changes in {len(updated_images)} images detected")
+    elif num_updated > 0:
+        sly.logger.info(f"The changes in {num_updated} images detected")
     return updated_images, updated_classes
 
 
@@ -251,15 +250,17 @@ def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, 
 
 
 def check_idxs_integrity(
-    project, stats, curr_projectfs_dir, idx_to_infos, updated_images
+    project, datasets, stats, curr_projectfs_dir, idx_to_infos, updated_images
 ) -> list:
     if sly.fs.dir_empty(curr_projectfs_dir):
         sly.logger.warning("The buffer is empty. Calculate full stats")
-        if len(updated_images) != project.items_count:
+        if any(
+            len(x) != d.items_count for x, d in zip(updated_images.values(), datasets)
+        ):
             sly.logger.warning(
                 f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
-            )
-            return get_project_images_all(project)
+            )  # TODO
+            return get_project_images_all(project, datasets)
     else:
         for stat in stats:
             files = sly.fs.list_files(
@@ -271,7 +272,7 @@ def check_idxs_integrity(
                 msg = f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
                 sly.logger.warning(msg)
                 # raise RuntimeError(msg)
-                return get_project_images_all(project)
+                return get_project_images_all(project, datasets)
 
     return updated_images
 
@@ -357,9 +358,10 @@ def calculate_and_save_stats(
     chunk_to_images,
     image_to_chunk,
 ):
-    with tqdm(desc="Calculating stats", total=len(updated_images)) as pbar:
+    total = sum(len(lst) for lst in updated_images.values())
+    with tqdm(desc="Calculating stats", total=total) as pbar:
 
-        info = {info.id: info for info in updated_images}
+        # id2info = {info.id: info for info in updated_images}
         for dataset in datasets:
             # ds_updated_images = [
             #     image for image in updated_images if image.dataset_id == dataset.id
@@ -369,18 +371,17 @@ def calculate_and_save_stats(
             # )
 
             figures = get_figures_list(dataset.id)
-
             figures.sort(key=lambda x: x.entity_id)
 
             grouped = {}
             for key, group in groupby(figures, key=lambda x: x.entity_id):
                 grouped[key] = list(group)
 
-            for batch in sly.batched(list(grouped.keys()), 500):
-                for image_id in batch:
+            for batch_infos in sly.batched(updated_images[dataset.id], 500):
+                for image in batch_infos:
                     for stat in stats:
-                        stat.update2(info[image_id], grouped[image_id])
-                pbar.update(len(batch))
+                        stat.update2(image, grouped[image.id])
+                pbar.update(len(batch_infos))
 
         if pbar.last_print_n < pbar.total:  # unlabeled images
             pbar.update(pbar.total - pbar.n)
@@ -459,7 +460,7 @@ def get_figures_list(dataset_id):
         "classId",
         "projectId",
         "datasetId",
-        # "geometry",
+        "geometry",
         "meta",
         "area",
         "realArea",

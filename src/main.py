@@ -73,9 +73,9 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     os.makedirs(project_fs_dir, exist_ok=True)
 
     updated_images, updated_classes = u.get_updated_images_and_classes(
-        project, project_meta, force_stats_recalc
+        project, project_meta, datasets, force_stats_recalc
     )
-    if len(updated_images) == 0:
+    if all(x == [] for x in updated_images.values()):
         sly.logger.info("Nothing to update. Skipping stats calculation...")
         response.status_code = status.HTTP_200_OK
         response.body = b"Nothing to update. Skipping stats calculation..."
@@ -91,7 +91,7 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
     updated_images = u.check_idxs_integrity(
-        project, stats, project_fs_dir, idx_to_infos, updated_images
+        project, datasets, stats, project_fs_dir, idx_to_infos, updated_images
     )
 
     tf_all_paths = [
