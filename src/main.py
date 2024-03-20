@@ -73,9 +73,10 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     os.makedirs(project_fs_dir, exist_ok=True)
 
     updated_images, updated_classes = u.get_updated_images_and_classes(
-        project, project_meta, force_stats_recalc
+        project, project_meta, datasets, force_stats_recalc
     )
-    if len(updated_images) == 0:
+    total_updated = sum(len(lst) for lst in updated_images.values())
+    if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
         response.status_code = status.HTTP_200_OK
         response.body = b"Nothing to update. Skipping stats calculation..."
@@ -91,18 +92,19 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
     updated_images = u.check_idxs_integrity(
-        project, stats, project_fs_dir, idx_to_infos, updated_images
+        project, datasets, stats, project_fs_dir, idx_to_infos, updated_images
     )
 
     tf_all_paths = [
         info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
     ]
 
-    sly.logger.info(f"Start calculating stats for {len(updated_images)} images")
+    sly.logger.info(f"Start calculating stats for {total_updated} images")
     u.calculate_and_save_stats(
         datasets,
         project_meta,
         updated_images,
+        total_updated,
         stats,
         tf_all_paths,
         project_fs_dir,
@@ -110,15 +112,15 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         infos_to_idx,
     )
 
-    u.delete_old_chunks(team.id)
-    u.sew_chunks_to_json_and_upload_chunks(
-        team.id, stats, project_fs_dir, tf_project_dir, updated_classes
-    )
+    # u.delete_old_chunks(team.id)
+    # u.sew_chunks_to_json_and_upload_chunks(
+    #     team.id, stats, project_fs_dir, tf_project_dir, updated_classes
+    # )
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
     u.push_cache(team.id, project_id, tf_cache_dir)
 
-    response.body = f"The stats for {len(updated_images)} images were calculated."
+    response.body = f"The stats for {total_updated} images were calculated."
     response.status_code = status.HTTP_200_OK
     if sly.is_production():
         file = g.api.file.get_info_by_path(
@@ -128,15 +130,3 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         # sly.logger.info(f"task id: {g.api.task_id}, file id: {file.id}")
         #  makes no sence because the app is not stopped.
     return response
-
-
-@server.get("/logs")
-async def get_logs():
-
-    sly.logger.getEffectiveLevel()
-
-    for handler in sly.logger.handlers:
-        if isinstance(handler, logging.StreamHandler):
-            log_message = handler.stream.getvalue().splitlines()
-
-    return log_message

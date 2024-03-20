@@ -1,11 +1,11 @@
-import json
+import json, time
 import os
 import math
 from typing import List, Literal, Optional, Dict, Tuple
 from datetime import datetime
 import humanize
 from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo
-
+from itertools import groupby
 from tqdm import tqdm
 import supervisely as sly
 import src.globals as g
@@ -154,30 +154,33 @@ def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
     sly.logger.info("The cache was pushed to team files")
 
 
-def get_project_images_all(project_info: ProjectInfo) -> List[ImageInfo]:
-    images_flat = []
-    for dataset in g.api.dataset.get_list(project_info.id):
-        images_flat += g.api.image.get_list(dataset.id)
-    return images_flat
+def get_project_images_all(
+    project_info: ProjectInfo, datasets: List[DatasetInfo]
+) -> List[ImageInfo]:
+    return {d.id: g.api.image.get_list(d.id) for d in datasets}
 
 
 def get_updated_images_and_classes(
     project: ProjectInfo,
     project_meta: ProjectMeta,
+    datasets: List[DatasetInfo],
     force_stats_recalc: bool,
 ) -> Tuple[List[ImageInfo], List[str]]:
-    updated_images, updated_classes = [], []
+    updated_images, updated_classes = {d.id: [] for d in datasets}, []
     if len(project_meta.obj_classes.items()) == 0:
         sly.logger.info("The project is fully unlabeled")
-        return updated_images, updated_classes
+        return {}, []
 
-    images_flat = get_project_images_all(project)
+    images_all_dct = get_project_images_all(project, datasets)
+    images_all_flat = []
+    for value in images_all_dct.values():
+        images_all_flat.extend(value)
 
     if force_stats_recalc is True:
-        for image in images_flat:
+        for image in images_all_flat:
             g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
         g.META_CACHE[project.id] = project_meta
-        return images_flat, updated_classes
+        return images_all_dct, updated_classes
 
     if g.META_CACHE.get(project.id) is not None:
         cached_classes = g.META_CACHE[project.id].obj_classes
@@ -190,25 +193,20 @@ def get_updated_images_and_classes(
             sly.logger.info(
                 f"Changes in the number of classes detected: {updated_classes}"
             )
-            # sly.logger.warning(
-            #     "Changes in the number of classes detected. Recalculate full stats... "  # TODO
-            # )
-            # g.META_CACHE[project.id] = project_meta
-            # return images_flat
 
     g.META_CACHE[project.id] = project_meta
 
-    set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([image.id for image in images_flat])
+    set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([i.id for i in images_all_flat])
 
-    for image in images_flat:
+    for image in images_all_flat:
         try:
             image: ImageInfo
             cached_updated_at = g.PROJ_IMAGES_CACHE[image.id]
             if image.updated_at != cached_updated_at:
-                updated_images.append(image)
+                updated_images[image.dataset_id].append(image)
                 g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
         except KeyError:
-            updated_images.append(image)
+            updated_images[image.dataset_id].append(image)
             g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
 
     if set_A != set_B:
@@ -225,12 +223,13 @@ def get_updated_images_and_classes(
             }
 
         sly.logger.info("Recalculate full statistics")
-        return images_flat, []
+        return images_all_dct, []
 
-    if len(updated_images) == project.items_count:
+    num_updated = len(list(updated_images.values()))
+    if num_updated == project.items_count:
         sly.logger.info(f"Full dataset statistics will be calculated.")
-    elif len(updated_images) > 0:
-        sly.logger.info(f"The changes in {len(updated_images)} images detected")
+    elif num_updated > 0:
+        sly.logger.info(f"The changes in {num_updated} images detected")
     return updated_images, updated_classes
 
 
@@ -251,15 +250,17 @@ def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, 
 
 
 def check_idxs_integrity(
-    project, stats, curr_projectfs_dir, idx_to_infos, updated_images
+    project, datasets, stats, curr_projectfs_dir, idx_to_infos, updated_images
 ) -> list:
     if sly.fs.dir_empty(curr_projectfs_dir):
         sly.logger.warning("The buffer is empty. Calculate full stats")
-        if len(updated_images) != project.items_count:
+        if any(
+            len(x) != d.items_count for x, d in zip(updated_images.values(), datasets)
+        ):
             sly.logger.warning(
                 f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
-            )
-            return get_project_images_all(project)
+            )  # TODO
+            return get_project_images_all(project, datasets)
     else:
         for stat in stats:
             files = sly.fs.list_files(
@@ -271,7 +272,7 @@ def check_idxs_integrity(
                 msg = f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
                 sly.logger.warning(msg)
                 # raise RuntimeError(msg)
-                return get_project_images_all(project)
+                return get_project_images_all(project, datasets)
 
     return updated_images
 
@@ -351,71 +352,104 @@ def calculate_and_save_stats(
     datasets,
     project_meta,
     updated_images,
+    total_updated,
     stats,
     tf_all_paths,
-    curr_projectfs_dir,
+    project_fs_dir,
     chunk_to_images,
     image_to_chunk,
 ):
-    with tqdm(desc="Calculating stats", total=len(updated_images)) as pbar:
-        for dataset in datasets:
-            ds_updated_images = [
-                image for image in updated_images if image.dataset_id == dataset.id
-            ]
-            updated_chunks = list(
-                set([image_to_chunk[image.id] for image in ds_updated_images])
-            )
+    with tqdm(desc="Calculating stats", total=total_updated) as pbar:
 
-            for chunk in updated_chunks:
-                images_batch = chunk_to_images[chunk]
-                image_ids = [image.id for image in images_batch]
-                datetime_objects = [
-                    datetime.fromisoformat(timestamp[:-1])
-                    for timestamp in [image.updated_at for image in images_batch]
-                ]
-                latest_datetime = sorted(datetime_objects, reverse=True)[0]
+        for dataset_id, images in updated_images.items():
+            # for dataset in datasets:
+            # ds_updated_images = [
+            #     image for image in updated_images if image.dataset_id == dataset.id
+            # ]
+            # updated_chunks = list(
+            #     set([image_to_chunk[image.id] for image in ds_updated_images])
+            # )
 
-                janns = g.api.annotation.download_json_batch(dataset.id, image_ids)
-                anns = [
-                    sly.Annotation.from_json(ann_json, project_meta)
-                    for ann_json in janns
-                ]
+            # too slow :(( limit batch 500
+            # for batch_infos in sly.batched(images, 500):
+            #     batch_ids = [x.id for x in batch_infos]
+            #     batch_figures = g.api.image.figure.download(
+            #         dataset_id, batch_ids, skip_geometry=True
+            #     )
+            sly.logger.debug("start figure download")
+            figures = g.api.image.figure.download(dataset_id, skip_geometry=True)
+            sly.logger.debug("end figure download")
 
-                for img, ann in zip(images_batch, anns):
+            for batch_infos in sly.batched(images, 1000):
+                for image in batch_infos:
                     for stat in stats:
-                        stat.update(img, ann)
-                    pbar.update(1)
+                        stat.update2(image, figures.get(image.id))
+                pbar.update(len(batch_infos))
 
-                for stat in stats:
-                    savedir = f"{curr_projectfs_dir}/{stat.basename_stem}"
-                    os.makedirs(savedir, exist_ok=True)
+        if pbar.last_print_n < pbar.total:  # unlabeled images
+            pbar.update(pbar.total - pbar.n)
 
-                    tf_stat_chunks = [
-                        path
-                        for path in tf_all_paths
-                        if (stat.basename_stem in path) and (chunk in path)
-                    ]
+        for stat in stats:
+            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png")
+            res = stat.to_json2()
+            if res is not None:
+                with open(
+                    f"{project_fs_dir}/{stat.basename_stem}.json",
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    json.dump(res, f)
 
-                    if len(tf_stat_chunks) > 0:
-                        timestamps = [
-                            get_file_name(path).split("_")[-1]
-                            for path in tf_stat_chunks
-                        ]
-                        datetime_objects = [
-                            datetime.fromisoformat(timestamp)
-                            for timestamp in timestamps
-                        ]
-                        if latest_datetime > sorted(datetime_objects, reverse=True)[0]:
-                            g.TF_OLD_CHUNKS += tf_stat_chunks
-                            for path in list_files(savedir, [".npy"]):
-                                if chunk in path:
-                                    os.remove(path)
+                # for chunk in updated_chunks:
+                #     images_batch = chunk_to_images[chunk]
+                #     image_ids = [image.id for image in images_batch]
+                #     datetime_objects = [
+                #         datetime.fromisoformat(timestamp[:-1])
+                #         for timestamp in [image.updated_at for image in images_batch]
+                #     ]
+                #     latest_datetime = sorted(datetime_objects, reverse=True)[0]
 
-                    np.save(
-                        f"{savedir}/{chunk}_{g.CHUNK_SIZE}_{latest_datetime.isoformat()}.npy",
-                        stat.to_numpy_raw(),
-                    )
-                    stat.clean()
+                #     janns = g.api.annotation.download_json_batch(dataset.id, image_ids)
+                #     anns = [
+                #         sly.Annotation.from_json(ann_json, project_meta)
+                #         for ann_json in janns
+                #     ]
+
+                #     for img, ann in zip(images_batch, anns):
+                #         for stat in stats:
+                #             stat.update(img, ann)
+                #         pbar.update(1)
+
+                # for stat in stats:
+                #     savedir = f"{curr_projectfs_dir}/{stat.basename_stem}"
+                #     os.makedirs(savedir, exist_ok=True)
+
+                #     tf_stat_chunks = [
+                #         path
+                #         for path in tf_all_paths
+                #         if (stat.basename_stem in path) and (chunk in path)
+                #     ]
+
+                #     if len(tf_stat_chunks) > 0:
+                #         timestamps = [
+                #             get_file_name(path).split("_")[-1]
+                #             for path in tf_stat_chunks
+                #         ]
+                #         datetime_objects = [
+                #             datetime.fromisoformat(timestamp)
+                #             for timestamp in timestamps
+                #         ]
+                #         if latest_datetime > sorted(datetime_objects, reverse=True)[0]:
+                #             g.TF_OLD_CHUNKS += tf_stat_chunks
+                #             for path in list_files(savedir, [".npy"]):
+                #                 if chunk in path:
+                #                     os.remove(path)
+
+                #     np.save(
+                #         f"{savedir}/{chunk}_{g.CHUNK_SIZE}_{latest_datetime.isoformat()}.npy",
+                #         stat.to_numpy_raw(),
+                #     )
+                #     stat.clean()
 
 
 def delete_old_chunks(team_id):
