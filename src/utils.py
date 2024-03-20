@@ -452,43 +452,6 @@ def calculate_and_save_stats(
                 #     stat.clean()
 
 
-def get_figures_list(dataset_id):
-    fields = [
-        "id",
-        "createdAt",
-        "updatedAt",
-        "imageId",
-        "priority",
-        "objectId",
-        "classId",
-        "projectId",
-        "datasetId",
-        "geometry",
-        "meta",
-        "area",
-        "realArea",
-        "tool",
-        "instanceId",
-        "geometryType",
-        "description",
-        "createdBy",
-    ]
-    start_time = time.time()
-    figures_infos = g.api.image.figure.get_list_all_pages(
-        "figures.list",
-        {
-            # ApiField.DATASET_ID: dataset_id,
-            # ApiField.FIELDS: fields,
-            "datasetId": dataset_id,
-            "fields": fields,
-        },
-    )
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    sly.logger.debug(f"Elapsed Time 'figures.list': {round(elapsed_time, 2)} seconds\n")
-    return figures_infos
-
-
 def delete_old_chunks(team_id):
     if len(g.TF_OLD_CHUNKS) > 0:
         with tqdm(
