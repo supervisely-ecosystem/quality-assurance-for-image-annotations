@@ -1,4 +1,4 @@
-import json
+import json, time
 import os
 import math
 from typing import List, Literal, Optional, Dict, Tuple
@@ -370,17 +370,17 @@ def calculate_and_save_stats(
             #     set([image_to_chunk[image.id] for image in ds_updated_images])
             # )
 
-            figures = get_figures_list(dataset.id)
-            figures.sort(key=lambda x: x.entity_id)
+            figures_ds = get_figures_list(dataset.id)
+            figures_ds.sort(key=lambda x: x.entity_id)
 
             grouped = {}
-            for key, group in groupby(figures, key=lambda x: x.entity_id):
+            for key, group in groupby(figures_ds, key=lambda x: x.entity_id):
                 grouped[key] = list(group)
 
             for batch_infos in sly.batched(updated_images[dataset.id], 500):
                 for image in batch_infos:
                     for stat in stats:
-                        stat.update2(image, grouped[image.id])
+                        stat.update2(image, grouped.get(image.id))
                 pbar.update(len(batch_infos))
 
         if pbar.last_print_n < pbar.total:  # unlabeled images
@@ -470,6 +470,7 @@ def get_figures_list(dataset_id):
         "description",
         "createdBy",
     ]
+    start_time = time.time()
     figures_infos = g.api.image.figure.get_list_all_pages(
         "figures.list",
         {
@@ -479,6 +480,9 @@ def get_figures_list(dataset_id):
             "fields": fields,
         },
     )
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    sly.logger.debug(f"Elapsed Time 'figures.list': {round(elapsed_time, 2)} seconds\n")
     return figures_infos
 
 
