@@ -72,7 +72,6 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
-    force_stats_recalc = True
     updated_images, updated_classes = u.get_updated_images_and_classes(
         project, project_meta, datasets, force_stats_recalc
     )
@@ -82,6 +81,8 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         response.status_code = status.HTTP_200_OK
         response.body = b"Nothing to update. Skipping stats calculation..."
         return response
+
+    updated_images = u.get_project_images_all(project, datasets)  # !tmp
 
     if g.api.file.dir_exists(team.id, tf_project_dir) is True:
         force_stats_recalc = u.download_stats_chunks_to_buffer(
