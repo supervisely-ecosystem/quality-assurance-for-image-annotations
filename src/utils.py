@@ -374,7 +374,7 @@ def calculate_and_save_stats(
             for batch_infos in sly.batched(images, 100):
                 batch_ids = [x.id for x in batch_infos]
                 figures = g.api.image.figure.download(
-                    dataset_id, batch_ids, skip_geometry=True
+                    dataset_id, batch_ids, skip_geometry=False
                 )
                 # sly.logger.debug("start figure download")
                 # figures = g.api.image.figure.download(dataset_id, skip_geometry=True)
