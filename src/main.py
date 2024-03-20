@@ -72,6 +72,7 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
+    force_stats_recalc = True
     updated_images, updated_classes = u.get_updated_images_and_classes(
         project, project_meta, datasets, force_stats_recalc
     )
