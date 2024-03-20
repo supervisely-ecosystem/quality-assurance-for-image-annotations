@@ -75,7 +75,8 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     updated_images, updated_classes = u.get_updated_images_and_classes(
         project, project_meta, datasets, force_stats_recalc
     )
-    if all(x == [] for x in updated_images.values()):
+    total_updated = sum(len(lst) for lst in updated_images.values())
+    if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
         response.status_code = status.HTTP_200_OK
         response.body = b"Nothing to update. Skipping stats calculation..."
@@ -98,11 +99,12 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
     ]
 
-    sly.logger.info(f"Start calculating stats for {len(updated_images)} images")
+    sly.logger.info(f"Start calculating stats for {total_updated} images")
     u.calculate_and_save_stats(
         datasets,
         project_meta,
         updated_images,
+        total_updated,
         stats,
         tf_all_paths,
         project_fs_dir,
@@ -118,7 +120,7 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     u.push_cache(team.id, project_id, tf_cache_dir)
 
-    response.body = f"The stats for {len(updated_images)} images were calculated."
+    response.body = f"The stats for {total_updated} images were calculated."
     response.status_code = status.HTTP_200_OK
     if sly.is_production():
         file = g.api.file.get_info_by_path(

@@ -352,14 +352,14 @@ def calculate_and_save_stats(
     datasets,
     project_meta,
     updated_images,
+    total_updated,
     stats,
     tf_all_paths,
     project_fs_dir,
     chunk_to_images,
     image_to_chunk,
 ):
-    total = sum(len(lst) for lst in updated_images.values())
-    with tqdm(desc="Calculating stats", total=total) as pbar:
+    with tqdm(desc="Calculating stats", total=total_updated) as pbar:
 
         for dataset_id, images in updated_images.items():
             # for dataset in datasets:
