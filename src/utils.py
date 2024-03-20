@@ -361,8 +361,8 @@ def calculate_and_save_stats(
     total = sum(len(lst) for lst in updated_images.values())
     with tqdm(desc="Calculating stats", total=total) as pbar:
 
-        # id2info = {info.id: info for info in updated_images}
-        for dataset in datasets:
+        for dataset_id, images in updated_images.items():
+            # for dataset in datasets:
             # ds_updated_images = [
             #     image for image in updated_images if image.dataset_id == dataset.id
             # ]
@@ -370,17 +370,20 @@ def calculate_and_save_stats(
             #     set([image_to_chunk[image.id] for image in ds_updated_images])
             # )
 
-            figures_ds = get_figures_list(dataset.id)
-            figures_ds.sort(key=lambda x: x.entity_id)
+            # too slow :(( limit batch 500
+            # for batch_infos in sly.batched(images, 500):
+            #     batch_ids = [x.id for x in batch_infos]
+            #     batch_figures = g.api.image.figure.download(
+            #         dataset_id, batch_ids, skip_geometry=True
+            #     )
+            sly.logger.debug("start figure download")
+            figures = g.api.image.figure.download(dataset_id, skip_geometry=True)
+            sly.logger.debug("end figure download")
 
-            grouped = {}
-            for key, group in groupby(figures_ds, key=lambda x: x.entity_id):
-                grouped[key] = list(group)
-
-            for batch_infos in sly.batched(updated_images[dataset.id], 500):
+            for batch_infos in sly.batched(images, 1000):
                 for image in batch_infos:
                     for stat in stats:
-                        stat.update2(image, grouped.get(image.id))
+                        stat.update2(image, figures.get(image.id))
                 pbar.update(len(batch_infos))
 
         if pbar.last_print_n < pbar.total:  # unlabeled images
