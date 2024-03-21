@@ -124,11 +124,4 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     response.body = f"The stats for {total_updated} images were calculated."
     response.status_code = status.HTTP_200_OK
-    if sly.is_production():
-        file = g.api.file.get_info_by_path(
-            team.id, tf_project_dir + "/class_balance.json"
-        )
-        g.api.task.set_output_directory(g.api.task_id, file.id, tf_cache_dir)
-        # sly.logger.info(f"task id: {g.api.task_id}, file id: {file.id}")
-        #  makes no sence because the app is not stopped.
     return response
