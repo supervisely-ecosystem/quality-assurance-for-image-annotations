@@ -10,6 +10,7 @@ from tqdm import tqdm
 import supervisely as sly
 import src.globals as g
 import numpy as np
+import ujson
 
 from supervisely.io.fs import (
     get_file_name_with_ext,
@@ -383,22 +384,26 @@ def calculate_and_save_stats(
                 # for batch_infos in sly.batched(images, 1000):
                 for image in batch_infos:
                     for stat in stats:
-                        stat.update2(image, figures.get(image.id))
+                        stat.update2(image, figures.get(image.id, []))
                 pbar.update(len(batch_infos))
 
         if pbar.last_print_n < pbar.total:  # unlabeled images
             pbar.update(pbar.total - pbar.n)
 
         for stat in stats:
-            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png")
+            if sly.is_development():
+                stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png")
+
             res = stat.to_json2()
             if res is not None:
+                json_data = ujson.dumps(res)
+                json_bytes = json_data.encode("utf-8")
+
                 with open(
                     f"{project_fs_dir}/{stat.basename_stem}.json",
-                    "w",
-                    encoding="utf-8",
+                    "wb",  # Use binary mode
                 ) as f:
-                    json.dump(res, f)
+                    f.write(json_bytes)
 
                 # for chunk in updated_chunks:
                 #     images_batch = chunk_to_images[chunk]

@@ -6,3 +6,4 @@ git+https://github.com/supervisely/supervisely.git@wrap-figures-list
 # dataset-tools
 git+https://github.com/supervisely/dataset-tools.git@figures_list
 humanize
+ujson
