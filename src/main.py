@@ -82,7 +82,7 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         response.body = b"Nothing to update. Skipping stats calculation..."
         return response
 
-    updated_images = u.get_project_images_all(project, datasets)  # !tmp
+    # updated_images = u.get_project_images_all(project, datasets)  # !tmp
 
     if g.api.file.dir_exists(team.id, tf_project_dir) is True:
         force_stats_recalc = u.download_stats_chunks_to_buffer(
@@ -102,7 +102,9 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     ]
 
     sly.logger.info(f"Start calculating stats for {total_updated} images")
+
     u.calculate_and_save_stats(
+        project,
         datasets,
         project_meta,
         updated_images,
@@ -115,9 +117,9 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     )
 
     # u.delete_old_chunks(team.id)
-    # u.sew_chunks_to_json_and_upload_chunks(
-    #     team.id, stats, project_fs_dir, tf_project_dir, updated_classes
-    # )
+    u.sew_chunks_to_json_and_upload_chunks(
+        team.id, stats, project_fs_dir, tf_project_dir, updated_classes
+    )
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
     u.push_cache(team.id, project_id, tf_cache_dir)
