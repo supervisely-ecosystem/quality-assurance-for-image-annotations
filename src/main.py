@@ -84,7 +84,10 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     # updated_images = u.get_project_images_all(project, datasets)  # !tmp
 
-    if g.api.file.dir_exists(team.id, tf_project_dir) is True:
+    if (
+        g.api.file.dir_exists(team.id, tf_project_dir) is True
+        and total_updated < project.items_count
+    ):
         force_stats_recalc = u.download_stats_chunks_to_buffer(
             team.id, tf_project_dir, project_fs_dir, stats, force_stats_recalc
         )

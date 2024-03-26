@@ -2,6 +2,7 @@ import json, time
 import os
 import math
 from typing import List, Literal, Optional, Dict, Tuple
+import dataset_tools as dtools
 from datetime import datetime
 import humanize
 from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo
@@ -181,18 +182,27 @@ def get_updated_images_and_classes(
         for image in images_all_flat:
             g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
         g.META_CACHE[project.id] = project_meta
-        return images_all_dct, updated_classes
+        return images_all_dct, {}
 
     if g.META_CACHE.get(project.id) is not None:
         cached_classes = g.META_CACHE[project.id].obj_classes
         if len(cached_classes) != len(project_meta.obj_classes):
-            updated_classes = list(
-                set(cached_classes.keys()).symmetric_difference(
-                    set(project_meta.obj_classes.keys())
-                )
-            )  # TODO
+            cached = {x.sly_id: x.name for x in cached_classes}
+            actual = {x.sly_id: x.name for x in project_meta.obj_classes}
+            cached_ids = set(cached.keys())
+            actual_ids = set(actual.keys())
+
+            updated_ids = actual_ids.symmetric_difference(cached_ids)
+
+            def func(pair):
+                id, name = pair
+                return True if id in updated_ids else False
+
+            for dct in [cached, actual]:
+                updated_classes.update(dict(filter(func, dct.items())))
+
             sly.logger.info(
-                f"Changes in the number of classes detected: {updated_classes}"
+                f"Changes in the number of classes detected: {list(updated_classes.values())}"
             )
 
     g.META_CACHE[project.id] = project_meta
@@ -224,9 +234,9 @@ def get_updated_images_and_classes(
             }
 
         sly.logger.info("Recalculate full statistics")
-        return images_all_dct, []
+        return images_all_dct, {}
 
-    num_updated = len(list(updated_images.values()))
+    num_updated = sum(len(lst) for lst in updated_images.values())
     if num_updated == project.items_count:
         sly.logger.info(f"Full dataset statistics will be calculated.")
     elif num_updated > 0:
