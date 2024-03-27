@@ -34,14 +34,15 @@ def _load_json_cache(path_img, path_meta):
 
 
 def pull_cache(
-    team_id: int, project_id: int, tf_cache_dir: str, curr_tf_project_dir: str
+    team_id: int, project_id: int, tf_cache_dir: str, tf_project_dir: str
 ) -> bool:
     force_stats_recalc = False
 
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     if sly.fs.dir_exists(local_cache_dir):
         sly.fs.clean_dir(local_cache_dir)
-    g.api.file.download_directory(team_id, tf_cache_dir, local_cache_dir)
+    if g.api.file.dir_exists(team_id, tf_project_dir):
+        g.api.file.download_directory(team_id, tf_cache_dir, local_cache_dir)
 
     path_img = os.path.join(local_cache_dir, "images_cache.json")
     path_meta = os.path.join(local_cache_dir, "meta_cache.json")
@@ -51,7 +52,7 @@ def pull_cache(
         sly.logger.warning("The cache directory not exists in team files. ")
         return True
 
-    if not g.api.file.dir_exists(team_id, curr_tf_project_dir):
+    if not g.api.file.dir_exists(team_id, tf_project_dir):
         sly.logger.warning("The project directory not exists in team files.")
         return True
 
