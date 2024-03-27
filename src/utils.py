@@ -22,6 +22,17 @@ from supervisely.io.fs import (
 )
 
 
+def _load_json_cache(path_img, path_meta):
+    if os.path.exists(path_img):
+        with open(path_img, "r", encoding="utf-8") as f:
+            g.IMAGES_CACHE = json.load(f)
+    if os.path.exists(path_meta):
+        with open(path_meta, "r", encoding="utf-8") as f:
+            g.META_CACHE = {
+                int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()
+            }
+
+
 def pull_cache(
     team_id: int, project_id: int, tf_cache_dir: str, curr_tf_project_dir: str
 ) -> bool:
@@ -30,6 +41,11 @@ def pull_cache(
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
     if sly.fs.dir_exists(local_cache_dir):
         sly.fs.clean_dir(local_cache_dir)
+    g.api.file.download_directory(team_id, tf_cache_dir, local_cache_dir)
+
+    path_img = os.path.join(local_cache_dir, "images_cache.json")
+    path_meta = os.path.join(local_cache_dir, "meta_cache.json")
+    _load_json_cache(path_img, path_meta)
 
     if not g.api.file.dir_exists(team_id, tf_cache_dir):
         sly.logger.warning("The cache directory not exists in team files. ")
@@ -38,8 +54,6 @@ def pull_cache(
     if not g.api.file.dir_exists(team_id, curr_tf_project_dir):
         sly.logger.warning("The project directory not exists in team files.")
         return True
-
-    g.api.file.download_directory(team_id, tf_cache_dir, local_cache_dir)
 
     spath = f"{local_cache_dir}/project_statistics_meta.json"
     if os.path.exists(spath):
@@ -53,12 +67,7 @@ def pull_cache(
                 )
                 return True
 
-    path = os.path.join(local_cache_dir, "meta_cache.json")
-    if os.path.exists(os.path.join(local_cache_dir, "meta_cache.json")):
-        with open(path, "r", encoding="utf-8") as f:
-            g.META_CACHE = {
-                int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()
-            }
+    if os.path.exists(path_meta):
         if g.META_CACHE.get(project_id) is None:
             sly.logger.info(
                 f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated."
@@ -70,14 +79,12 @@ def pull_cache(
         )
         force_stats_recalc = True
 
-    path = os.path.join(local_cache_dir, "images_cache.json")
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            g.IMAGES_CACHE = json.load(f)
+    if os.path.exists(path_img):
+        if g.IMAGES_CACHE.get(str(project_id)) is not None:
             g.PROJ_IMAGES_CACHE = {
-                int(k): v for k, v in g.IMAGES_CACHE.get(str(project_id), {}).items()
+                int(k): v for k, v in g.IMAGES_CACHE[str(project_id)].items()
             }
-        if g.META_CACHE.get(project_id) is None:
+        else:
             sly.logger.info(
                 f"The key with project ID={project_id} was not found in 'images_cache.json'. Stats will be fully recalculated."
             )
