@@ -1,12 +1,9 @@
-from datetime import datetime
-import json, os
-import numpy as np
+import os
 import src.globals as g
 import src.utils as u
 import supervisely as sly
-import logging
-
-from tqdm import tqdm
+import asyncio
+import concurrent.futures
 import dataset_tools as dtools
 from supervisely.io.fs import (
     get_file_name_with_ext,
@@ -17,22 +14,46 @@ from supervisely.io.fs import (
 )
 
 from pathlib import Path
-import src.globals as g
-import src.utils as u
-import supervisely as sly
-from fastapi import Response, HTTPException, status, Request
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse
+
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
 
-layout = Container(widgets=[card_1], direction="vertical")
 
+layout = Container(widgets=[card_1], direction="vertical")
 static_dir = Path(g.STORAGE_DIR)
 app = sly.Application(layout=layout, static_dir=static_dir)
 server = app.get_server()
 
 
-@server.get("/get-stats", response_class=Response)
-async def stats_endpoint(request: Request, response: Response, project_id: int):
+@server.get("/ping")
+async def test_ping():
+    """test asynchronous behaviour"""
+    return JSONResponse("ping")
+
+
+# Asynchronous endpoint using multiprocessing
+@server.get("/get-stats")
+async def stats_endpoint(project_id: int):
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ProcessPoolExecutor() as pool:
+        try:
+            result = await loop.run_in_executor(pool, cpu_bound_func, project_id)
+        except Exception as e:
+            msg = e.__class__.__name__ + ": '" + str(e) + "'"
+            sly.logger.error(msg)
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "title": "The app has got the following error:",
+                    "message": msg,
+                },
+            ) from e
+    return result
+
+
+def cpu_bound_func(project_id: int):
 
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
@@ -78,9 +99,9 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
-        response.status_code = status.HTTP_200_OK
-        response.body = b"Nothing to update. Skipping stats calculation..."
-        return response
+        return JSONResponse(
+            {"message": "Nothing to update. Skipping stats calculation..."}
+        )
 
     # updated_images = u.get_project_images_all(project, datasets)  # !tmp
 
@@ -119,7 +140,6 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
         infos_to_idx,
     )
 
-    # u.delete_old_chunks(team.id)
     u.sew_chunks_to_json_and_upload_chunks(
         team.id, stats, project_fs_dir, tf_project_dir, updated_classes
     )
@@ -127,6 +147,6 @@ async def stats_endpoint(request: Request, response: Response, project_id: int):
 
     u.push_cache(team.id, project_id, tf_cache_dir)
 
-    response.body = f"The stats for {total_updated} images were calculated."
-    response.status_code = status.HTTP_200_OK
-    return response
+    return JSONResponse(
+        {"message": f"The stats for {total_updated} images were calculated."}
+    )
