@@ -28,32 +28,29 @@ server = app.get_server()
 
 
 @server.get("/ping")
-async def test_ping():
+def test_ping():
     """test asynchronous behaviour"""
     return JSONResponse("ping")
 
 
-# Asynchronous endpoint using multiprocessing
 @server.get("/get-stats")
-async def stats_endpoint(project_id: int):
-    loop = asyncio.get_event_loop()
-    with concurrent.futures.ProcessPoolExecutor() as pool:
-        try:
-            result = await loop.run_in_executor(pool, cpu_bound_func, project_id)
-        except Exception as e:
-            msg = e.__class__.__name__ + ": '" + str(e) + "'"
-            sly.logger.error(msg)
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "title": "The app has got the following error:",
-                    "message": msg,
-                },
-            ) from e
+def stats_endpoint(project_id: int):
+    try:
+        result = main_func(project_id)
+    except Exception as e:
+        msg = e.__class__.__name__ + ": " + str(e)
+        sly.logger.error(msg)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "title": "The app has got the following error:",
+                "message": msg,
+            },
+        ) from e
     return result
 
 
-def cpu_bound_func(project_id: int):
+def main_func(project_id: int):
 
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
