@@ -3,6 +3,7 @@ import os
 import math
 from typing import List, Literal, Optional, Dict, Tuple
 import dataset_tools as dtools
+from dataset_tools.image.stats.basestats import BaseStats
 from datetime import datetime
 import humanize
 from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo
@@ -468,7 +469,7 @@ def delete_old_chunks(team_id):
 
 @sly.timeit
 def sew_chunks_to_json_and_upload_chunks(
-    team_id, stats, project_fs_dir, tf_project_dir, updated_classes
+    team_id, stats: List[BaseStats], project_fs_dir, tf_project_dir, updated_classes
 ):
     for stat in stats:
         stat.sew_chunks(
@@ -476,7 +477,7 @@ def sew_chunks_to_json_and_upload_chunks(
             updated_classes=updated_classes,
         )
         if sly.is_development():
-            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png")
+            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
 
         res = stat.to_json2()
         if res is not None:
