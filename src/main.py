@@ -107,11 +107,10 @@ def main_func(project_id: int):
         and total_updated < project.items_count
     ):
         force_stats_recalc = u.download_stats_chunks_to_buffer(
-            team.id, tf_project_dir, project_fs_dir, stats, force_stats_recalc
+            team.id, project, tf_project_dir, project_fs_dir, stats, force_stats_recalc
         )
-    files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
-    u.check_datasets_consistency(project, datasets, files_fs, len(stats))
-    u.remove_junk(project, datasets, files_fs)
+
+    u.remove_junk(project, datasets, project_fs_dir)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
     updated_images = u.check_idxs_integrity(
@@ -122,24 +121,24 @@ def main_func(project_id: int):
         info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
     ]
 
-    sly.logger.info(f"Start calculating stats for {total_updated} images")
-
     u.calculate_and_save_stats(
         project,
         datasets,
         project_meta,
         updated_images,
-        total_updated,
         stats,
         tf_all_paths,
         project_fs_dir,
         idx_to_infos,
         infos_to_idx,
     )
+    u.remove_junk(project, datasets, project_fs_dir)
 
-    u.sew_chunks_to_json_and_upload_chunks(
+    u.sew_chunks_to_json(
         team.id, stats, project_fs_dir, tf_project_dir, updated_classes
     )
+
+    u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
     u.push_cache(team.id, project_id, tf_cache_dir)
