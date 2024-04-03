@@ -1,4 +1,5 @@
 import json, time
+import tarfile
 import os
 import math
 from typing import List, Literal, Optional, Dict, Tuple
@@ -13,6 +14,7 @@ import supervisely as sly
 import src.globals as g
 import numpy as np
 import ujson
+from collections import defaultdict
 
 from supervisely.io.fs import (
     get_file_name_with_ext,
@@ -317,8 +319,28 @@ def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
     sly.logger.info("The consistency of data is OK")
 
 
-def remove_junk(project, datasets, files_fs):
+def remove_junk(project, datasets, project_fs_dir):
+    files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
     ds_ids, rm_cnt = [str(dataset.id) for dataset in datasets], 0
+
+    grouped_paths = defaultdict(list)
+    old_paths = []
+
+    for path in files_fs:
+        constant_part = path.split("_")[:-1]
+        constant_part = "_".join(constant_part)
+        grouped_paths[constant_part].append(path)
+
+    for constant_part, paths_list in grouped_paths.items():
+        if len(paths_list) > 1:
+            newest_path = max(paths_list, key=lambda x: x.split("_")[-1])
+            old_paths += [p for p in paths_list if newest_path != p]
+            grouped_paths[constant_part] = [newest_path]
+
+    for path in old_paths:
+        os.remove(path)
+        rm_cnt += 1
+
     for path in files_fs:
         if (path.split("_")[-4] not in ds_ids) or (
             f"_{project.id}_{g.CHUNK_SIZE}_" not in path
@@ -332,40 +354,69 @@ def remove_junk(project, datasets, files_fs):
         )
 
 
+@sly.timeit
 def download_stats_chunks_to_buffer(
-    team_id, tf_project_dir, project_fs_dir, stats, force_stats_recalc
+    team_id,
+    project: ProjectInfo,
+    tf_project_dir,
+    project_fs_dir,
+    stats,
+    force_stats_recalc,
 ) -> bool:
     if force_stats_recalc:
         return True
-    total_size = sum(
-        [
-            g.api.file.get_directory_size(
-                team_id, f"{tf_project_dir}/{stat.basename_stem}/"
-            )
-            for stat in stats
-        ]
-    )
+
+    archive_name = f"{project.id}_{project.name}_chunks.tar.gz"
+    src_path = f"{tf_project_dir}/{archive_name}"
+    dst_path = f"{project_fs_dir}/{archive_name}"
+
+    file = g.api.file.get_info_by_path(team_id, src_path)
     with tqdm(
-        desc=f"Downloading stats chunks to buffer",
-        total=total_size,
+        desc="Downloading stats chunks to buffer",
+        total=file.sizeb,
         unit="B",
         unit_scale=True,
     ) as pbar:
-        for stat in stats:
-            try:
-                g.api.file.download_directory(
-                    team_id,
-                    f"{tf_project_dir}/{stat.basename_stem}",
-                    f"{project_fs_dir}/{stat.basename_stem}",
-                    pbar,
-                )
-            except:
-                sly.logger.warning(
-                    "The integrity of the team files is broken. Recalculating full stats."
-                )
-                pbar.close()
-                return True
+        try:
+            g.api.file.download(team_id, src_path, dst_path, progress_cb=pbar)
+        except:
+            sly.logger.warning(
+                "The integrity of the team files is broken. Recalculating full stats."
+            )
+            return True
+
+    with tarfile.open(dst_path, "r:gz") as tar:
+        tar.extractall(project_fs_dir)
+
     return False
+    # total_size = sum(
+    #     [
+    #         g.api.file.get_directory_size(
+    #             team_id, f"{tf_project_dir}/{stat.basename_stem}/"
+    #         )
+    #         for stat in stats
+    #     ]
+    # )
+    # with tqdm(
+    #     desc=f"Downloading stats chunks to buffer",
+    #     total=total_size,
+    #     unit="B",
+    #     unit_scale=True,
+    # ) as pbar:
+    #     for stat in stats:
+    #         try:
+    #             g.api.file.download_directory(
+    #                 team_id,
+    #                 f"{tf_project_dir}/{stat.basename_stem}",
+    #                 f"{project_fs_dir}/{stat.basename_stem}",
+    #                 pbar,
+    #             )
+    #         except:
+    #             sly.logger.warning(
+    #                 "The integrity of the team files is broken. Recalculating full stats."
+    #             )
+    #             pbar.close()
+    #             return True
 
 
 @sly.timeit
@@ -374,13 +425,14 @@ def calculate_and_save_stats(
     datasets: List[DatasetInfo],
     project_meta: ProjectMeta,
     updated_images,
-    total_updated,
     stats,
     tf_all_paths,
     project_fs_dir,
     chunk_to_images,
     image_to_chunk,
 ):
+    total_updated = sum(len(lst) for lst in updated_images.values())
+    sly.logger.info(f"Start calculating stats for {total_updated} images.")
     with tqdm(desc="Calculating stats", total=total_updated) as pbar:
 
         for dataset_id, images in updated_images.items():
@@ -468,7 +520,7 @@ def delete_old_chunks(team_id):
 
 
 @sly.timeit
-def sew_chunks_to_json_and_upload_chunks(
+def sew_chunks_to_json(
     team_id, stats: List[BaseStats], project_fs_dir, tf_project_dir, updated_classes
 ):
     for stat in stats:
@@ -489,29 +541,55 @@ def sew_chunks_to_json_and_upload_chunks(
             ) as f:
                 f.write(json_bytes)
 
-        src_npy_paths = list_files(
-            f"{project_fs_dir}/{stat.basename_stem}", valid_extensions=[".npy"]
-        )
-        dst_npy_paths = [
-            f"{tf_project_dir}/{stat.basename_stem}/{get_file_name_with_ext(path)}"
-            for path in src_npy_paths
-        ]
 
-        g.api.file.remove_dir(
-            team_id, f"{tf_project_dir}/{stat.basename_stem}/", silent=True
-        )
-        sly.logger.info(
-            f"The old team files path '{tf_project_dir}/{stat.basename_stem}' is removed"
-        )
+@sly.timeit
+def archive_chunks_and_upload(
+    team_id,
+    project: ProjectInfo,
+    stats: List[BaseStats],
+    tf_project_dir,
+    project_fs_dir,
+):
 
-        sizeb = sly.fs.get_directory_size(f"{project_fs_dir}/{stat.basename_stem}")
-        size = humanize.naturalsize(sizeb)
-        sly.logger.info(f"Uploading {stat.basename_stem} chunks: {size}")
-        g.api.file.upload_bulk(team_id, src_npy_paths, dst_npy_paths)
+    def _compress_folders(folders, archive_path):
+        with tarfile.open(archive_path, "w:gz") as tar:
+            for folder in folders:
+                tar.add(folder, arcname=os.path.basename(folder))
 
-        sly.logger.info(
-            f"{stat.basename_stem}: {len(src_npy_paths)} chunks succesfully uploaded"
-        )
+    folders_to_compress = [f"{project_fs_dir}/{stat.basename_stem}" for stat in stats]
+
+    archive_name = f"{project.id}_{project.name}_chunks.tar.gz"
+    src_path = f"{project_fs_dir}/{archive_name}"
+    _compress_folders(folders_to_compress, src_path)
+
+    dst_path = f"{tf_project_dir}/{archive_name}"
+    g.api.file.upload(team_id, src_path, dst_path)
+
+    sly.logger.info(f"The '{archive_name}' file was succesfully uploaded.")
+
+    # src_npy_paths = list_files(
+    #     f"{project_fs_dir}/{stat.basename_stem}", valid_extensions=[".npy"]
+    # )
+    # dst_npy_paths = [
+    #     f"{tf_project_dir}/{stat.basename_stem}/{get_file_name_with_ext(path)}"
+    #     for path in src_npy_paths
+    # ]
+
+    # g.api.file.remove_dir(
+    #     team_id, f"{tf_project_dir}/{stat.basename_stem}/", silent=True
+    # )
+    # sly.logger.info(
+    #     f"The old team files path '{tf_project_dir}/{stat.basename_stem}' is removed"
+    # )
+
+    # sizeb = sly.fs.get_directory_size(f"{project_fs_dir}/{stat.basename_stem}")
+    # size = humanize.naturalsize(sizeb)
+    # sly.logger.info(f"Uploading {stat.basename_stem} chunks: {size}")
+    # g.api.file.upload_bulk(team_id, src_npy_paths, dst_npy_paths)
+
+    # sly.logger.info(
+    #     f"{stat.basename_stem}: {len(src_npy_paths)} chunks succesfully uploaded"
+    # )
 
 
 @sly.timeit
