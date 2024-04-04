@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
-
+from concurrent.futures import ThreadPoolExecutor
 
 layout = Container(widgets=[card_1], direction="vertical")
 static_dir = Path(g.STORAGE_DIR)
@@ -131,7 +131,11 @@ def main_func(project_id: int):
     u.remove_junk(project, datasets, project_fs_dir)
 
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
-    u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
+    # u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        executor.submit(
+            u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
+        )
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
     u.push_cache(team.id, project_id, tf_cache_dir)
