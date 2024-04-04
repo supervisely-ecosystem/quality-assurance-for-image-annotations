@@ -440,22 +440,23 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             f.write(json_bytes)
 
     for stat in stats:
-        sly.logger.info(f"### {stat.basename_stem}")
-        tm = sly.TinyTimer()
+        # sly.logger.info(f"### {stat.basename_stem}")
+        # tm = sly.TinyTimer()
         stat.sew_chunks(
             chunks_dir=f"{project_fs_dir}/{stat.basename_stem}/",
             updated_classes=updated_classes,
         )
-        sly.logger.info(f"chunks_sewed: {tm.get_sec()}")
-        # if sly.is_development():
-        #     stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
-        tm = sly.TinyTimer()
+        # sly.logger.info(f"chunks_sewed: {tm.get_sec()}")
+        if sly.is_development():
+            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
+
+        # tm = sly.TinyTimer()
         res = stat.to_json2()
-        sly.logger.info(f"json_received: {tm.get_sec()}")
+        # sly.logger.info(f"json_received: {tm.get_sec()}")
         if res is not None:
-            tm = sly.TinyTimer()
+            # tm = sly.TinyTimer()
             _save_to_json(res, f"{project_fs_dir}/{stat.basename_stem}.json")
-            sly.logger.info(f"json_saved: {tm.get_sec()}")
+            # sly.logger.info(f"json_saved: {tm.get_sec()}")
 
 
 @sly.timeit

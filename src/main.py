@@ -132,15 +132,14 @@ def main_func(project_id: int):
 
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
     # u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
-    sly.logger.info("Start threading")
-    my_thread = threading.Thread(
+    # sly.logger.info("Start threading")
+    thread = threading.Thread(
         target=u.archive_chunks_and_upload,
         args=(team.id, project, stats, tf_project_dir, project_fs_dir),
     )
-    my_thread.start()
+    thread.start()
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
-
     u.push_cache(team.id, project_id, tf_cache_dir)
 
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
