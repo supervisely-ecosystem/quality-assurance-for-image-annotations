@@ -167,9 +167,7 @@ def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
     sly.logger.info("The cache was pushed to team files")
 
 
-def get_project_images_all(
-    project_info: ProjectInfo, datasets: List[DatasetInfo]
-) -> List[ImageInfo]:
+def get_project_images_all(datasets: List[DatasetInfo]) -> List[ImageInfo]:
     return {d.id: g.api.image.get_list(d.id) for d in datasets}
 
 
@@ -184,7 +182,7 @@ def get_updated_images_and_classes(
         sly.logger.info("The project is fully unlabeled")
         return {}, {}
 
-    images_all_dct = get_project_images_all(project, datasets)
+    images_all_dct = get_project_images_all(datasets)
     images_all_flat = []
     for value in images_all_dct.values():
         images_all_flat.extend(value)
@@ -282,7 +280,7 @@ def check_idxs_integrity(
             sly.logger.warning(
                 f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
             )  # TODO
-            return get_project_images_all(project, datasets)
+            return get_project_images_all(datasets)
     else:
         for stat in stats:
             files = sly.fs.list_files(
@@ -294,7 +292,7 @@ def check_idxs_integrity(
                 msg = f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
                 sly.logger.warning(msg)
                 # raise RuntimeError(msg)
-                return get_project_images_all(project, datasets)
+                return get_project_images_all(datasets)
 
     return updated_images
 
@@ -360,7 +358,6 @@ def download_stats_chunks_to_buffer(
     project: ProjectInfo,
     tf_project_dir,
     project_fs_dir,
-    stats,
     force_stats_recalc,
 ) -> bool:
     if force_stats_recalc:
@@ -389,41 +386,10 @@ def download_stats_chunks_to_buffer(
         tar.extractall(project_fs_dir)
 
     return False
-    # total_size = sum(
-    #     [
-    #         g.api.file.get_directory_size(
-    #             team_id, f"{tf_project_dir}/{stat.basename_stem}/"
-    #         )
-    #         for stat in stats
-    #     ]
-    # )
-    # with tqdm(
-    #     desc=f"Downloading stats chunks to buffer",
-    #     total=total_size,
-    #     unit="B",
-    #     unit_scale=True,
-    # ) as pbar:
-    #     for stat in stats:
-    #         try:
-    #             g.api.file.download_directory(
-    #                 team_id,
-    #                 f"{tf_project_dir}/{stat.basename_stem}",
-    #                 f"{project_fs_dir}/{stat.basename_stem}",
-    #                 pbar,
-    #             )
-    #         except:
-    #             sly.logger.warning(
-    #                 "The integrity of the team files is broken. Recalculating full stats."
-    #             )
-    #             pbar.close()
-    #             return True
 
 
 @sly.timeit
 def calculate_and_save_stats(
-    project: ProjectInfo,
-    datasets: List[DatasetInfo],
-    project_meta: ProjectMeta,
     updated_images,
     stats,
     tf_all_paths,
@@ -436,12 +402,10 @@ def calculate_and_save_stats(
     with tqdm(desc="Calculating stats", total=total_updated) as pbar:
 
         for dataset_id, images in updated_images.items():
-
             updated_chunks = list(set([image_to_chunk[image.id] for image in images]))
 
             for chunk in updated_chunks:
                 images_chunk = chunk_to_images[chunk]
-                # image_ids = [image.id for image in images_chunk]
 
                 for batch_infos in sly.batched(images_chunk, 100):
                     batch_ids = [x.id for x in batch_infos]
@@ -452,9 +416,6 @@ def calculate_and_save_stats(
                         for stat in stats:
                             stat.update2(image, figures.get(image.id, []))
                     pbar.update(len(batch_infos))
-
-                # if project.items_count == total_updated:
-                #     break  # speed optimization
 
                 latest_datetime = get_latest_datetime(images_chunk)
                 for stat in stats:
@@ -493,7 +454,6 @@ def save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime):
             datetime.fromisoformat(timestamp) for timestamp in timestamps
         ]
         if latest_datetime > sorted(datetime_objects, reverse=True)[0]:
-            # g.TF_OLD_CHUNKS += tf_stat_chunks
             for path in list_files(savedir, [".npy"]):
                 if chunk in path:
                     os.remove(path)
@@ -505,41 +465,25 @@ def save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime):
 
 
 @sly.timeit
-def delete_old_chunks(team_id):
-    if len(g.TF_OLD_CHUNKS) > 0:
-        with tqdm(
-            desc=f"Deleting old chunks in team files",
-            total=len(g.TF_OLD_CHUNKS),
-            unit="B",
-            unit_scale=True,
-        ) as pbar:
-            g.api.file.remove_batch(team_id, g.TF_OLD_CHUNKS, progress_cb=pbar)
+def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
+    # @sly.timeit
+    def _save_to_json(res, dst_path):
+        json_data = ujson.dumps(res)
+        json_bytes = json_data.encode("utf-8")
+        with open(dst_path, "wb") as f:  # Use binary mode
+            f.write(json_bytes)
 
-        sly.logger.info(f"{len(g.TF_OLD_CHUNKS)} old chunks succesfully deleted")
-        g.TF_OLD_CHUNKS = []
-
-
-@sly.timeit
-def sew_chunks_to_json(
-    team_id, stats: List[BaseStats], project_fs_dir, tf_project_dir, updated_classes
-):
     for stat in stats:
         stat.sew_chunks(
             chunks_dir=f"{project_fs_dir}/{stat.basename_stem}/",
             updated_classes=updated_classes,
         )
-        if sly.is_development():
-            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
+        # if sly.is_development():
+        #     stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
 
         res = stat.to_json2()
         if res is not None:
-            json_data = ujson.dumps(res)
-            json_bytes = json_data.encode("utf-8")
-            with open(
-                f"{project_fs_dir}/{stat.basename_stem}.json",
-                "wb",  # Use binary mode
-            ) as f:
-                f.write(json_bytes)
+            _save_to_json(res, f"{project_fs_dir}/{stat.basename_stem}.json")
 
 
 @sly.timeit
@@ -550,46 +494,28 @@ def archive_chunks_and_upload(
     tf_project_dir,
     project_fs_dir,
 ):
-
-    def _compress_folders(folders, archive_path):
+    def _compress_folders(folders, archive_path) -> int:
         with tarfile.open(archive_path, "w:gz") as tar:
             for folder in folders:
                 tar.add(folder, arcname=os.path.basename(folder))
+        return sly.fs.get_file_size(archive_path)
 
     folders_to_compress = [f"{project_fs_dir}/{stat.basename_stem}" for stat in stats]
 
     archive_name = f"{project.id}_{project.name}_chunks.tar.gz"
     src_path = f"{project_fs_dir}/{archive_name}"
-    _compress_folders(folders_to_compress, src_path)
+    archive_sizeb = _compress_folders(folders_to_compress, src_path)
 
     dst_path = f"{tf_project_dir}/{archive_name}"
-    g.api.file.upload(team_id, src_path, dst_path)
+    with tqdm(
+        desc=f"Uploading '{archive_name}'",
+        total=archive_sizeb,
+        unit="B",
+        unit_scale=True,
+    ) as pbar:
+        g.api.file.upload(team_id, src_path, dst_path, progress_cb=pbar)
 
     sly.logger.info(f"The '{archive_name}' file was succesfully uploaded.")
-
-    # src_npy_paths = list_files(
-    #     f"{project_fs_dir}/{stat.basename_stem}", valid_extensions=[".npy"]
-    # )
-    # dst_npy_paths = [
-    #     f"{tf_project_dir}/{stat.basename_stem}/{get_file_name_with_ext(path)}"
-    #     for path in src_npy_paths
-    # ]
-
-    # g.api.file.remove_dir(
-    #     team_id, f"{tf_project_dir}/{stat.basename_stem}/", silent=True
-    # )
-    # sly.logger.info(
-    #     f"The old team files path '{tf_project_dir}/{stat.basename_stem}' is removed"
-    # )
-
-    # sizeb = sly.fs.get_directory_size(f"{project_fs_dir}/{stat.basename_stem}")
-    # size = humanize.naturalsize(sizeb)
-    # sly.logger.info(f"Uploading {stat.basename_stem} chunks: {size}")
-    # g.api.file.upload_bulk(team_id, src_npy_paths, dst_npy_paths)
-
-    # sly.logger.info(
-    #     f"{stat.basename_stem}: {len(src_npy_paths)} chunks succesfully uploaded"
-    # )
 
 
 @sly.timeit

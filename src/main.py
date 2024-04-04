@@ -52,6 +52,8 @@ def stats_endpoint(project_id: int):
 
 def main_func(project_id: int):
 
+    sly.logger.info("Start statistics calculation.")
+
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
 
@@ -107,7 +109,7 @@ def main_func(project_id: int):
         and total_updated < project.items_count
     ):
         force_stats_recalc = u.download_stats_chunks_to_buffer(
-            team.id, project, tf_project_dir, project_fs_dir, stats, force_stats_recalc
+            team.id, project, tf_project_dir, project_fs_dir, force_stats_recalc
         )
 
     u.remove_junk(project, datasets, project_fs_dir)
@@ -122,9 +124,6 @@ def main_func(project_id: int):
     ]
 
     u.calculate_and_save_stats(
-        project,
-        datasets,
-        project_meta,
         updated_images,
         stats,
         tf_all_paths,
@@ -134,10 +133,7 @@ def main_func(project_id: int):
     )
     u.remove_junk(project, datasets, project_fs_dir)
 
-    u.sew_chunks_to_json(
-        team.id, stats, project_fs_dir, tf_project_dir, updated_classes
-    )
-
+    u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
     u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
