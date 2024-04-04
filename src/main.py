@@ -98,9 +98,7 @@ def main_func(project_id: int):
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
-        return JSONResponse(
-            {"message": "Nothing to update. Skipping stats calculation..."}
-        )
+        return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
     # updated_images = u.get_project_images_all(project, datasets)  # !tmp
 
@@ -119,9 +117,7 @@ def main_func(project_id: int):
         project, datasets, stats, project_fs_dir, idx_to_infos, updated_images
     )
 
-    tf_all_paths = [
-        info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
-    ]
+    tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]
 
     u.calculate_and_save_stats(
         updated_images,
@@ -140,6 +136,4 @@ def main_func(project_id: int):
 
     u.push_cache(team.id, project_id, tf_cache_dir)
 
-    return JSONResponse(
-        {"message": f"The stats for {total_updated} images were calculated."}
-    )
+    return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
