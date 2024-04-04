@@ -12,14 +12,14 @@ from supervisely.io.fs import (
     get_file_size,
     list_files_recursively,
 )
-
+import threading
 from pathlib import Path
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
-
+from concurrent.futures import ThreadPoolExecutor
 
 layout = Container(widgets=[card_1], direction="vertical")
 static_dir = Path(g.STORAGE_DIR)
@@ -98,9 +98,7 @@ def main_func(project_id: int):
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
-        return JSONResponse(
-            {"message": "Nothing to update. Skipping stats calculation..."}
-        )
+        return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
     # updated_images = u.get_project_images_all(project, datasets)  # !tmp
 
@@ -119,9 +117,7 @@ def main_func(project_id: int):
         project, datasets, stats, project_fs_dir, idx_to_infos, updated_images
     )
 
-    tf_all_paths = [
-        info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
-    ]
+    tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]
 
     u.calculate_and_save_stats(
         updated_images,
@@ -135,11 +131,15 @@ def main_func(project_id: int):
     u.remove_junk(project, datasets, project_fs_dir)
 
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
-    u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
-    u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
+    # u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
+    # sly.logger.info("Start threading")
+    thread = threading.Thread(
+        target=u.archive_chunks_and_upload,
+        args=(team.id, project, stats, tf_project_dir, project_fs_dir),
+    )
+    thread.start()
 
+    u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project_id, tf_cache_dir)
 
-    return JSONResponse(
-        {"message": f"The stats for {total_updated} images were calculated."}
-    )
+    return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})

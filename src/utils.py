@@ -31,14 +31,10 @@ def _load_json_cache(path_img, path_meta):
             g.IMAGES_CACHE = json.load(f)
     if os.path.exists(path_meta):
         with open(path_meta, "r", encoding="utf-8") as f:
-            g.META_CACHE = {
-                int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()
-            }
+            g.META_CACHE = {int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()}
 
 
-def pull_cache(
-    team_id: int, project_id: int, tf_cache_dir: str, tf_project_dir: str
-) -> bool:
+def pull_cache(team_id: int, project_id: int, tf_cache_dir: str, tf_project_dir: str) -> bool:
     force_stats_recalc = False
 
     local_cache_dir = f"{g.STORAGE_DIR}/_cache"
@@ -66,9 +62,7 @@ def pull_cache(
         smeta = stats_meta.get(str(project_id))
         if smeta is not None:
             if smeta["chunk_size"] != g.CHUNK_SIZE:
-                sly.logger.warning(
-                    "The chunk size has changed. Recalculating full stats..."
-                )
+                sly.logger.warning("The chunk size has changed. Recalculating full stats...")
                 return True
 
     if os.path.exists(path_meta):
@@ -78,25 +72,19 @@ def pull_cache(
             )
             force_stats_recalc = True
     else:
-        sly.logger.warning(
-            "The 'meta_cache.json' file not exists. Stats will be recalculated."
-        )
+        sly.logger.warning("The 'meta_cache.json' file not exists. Stats will be recalculated.")
         force_stats_recalc = True
 
     if os.path.exists(path_img):
         if g.IMAGES_CACHE.get(str(project_id)) is not None:
-            g.PROJ_IMAGES_CACHE = {
-                int(k): v for k, v in g.IMAGES_CACHE[str(project_id)].items()
-            }
+            g.PROJ_IMAGES_CACHE = {int(k): v for k, v in g.IMAGES_CACHE[str(project_id)].items()}
         else:
             sly.logger.info(
                 f"The key with project ID={project_id} was not found in 'images_cache.json'. Stats will be fully recalculated."
             )
             force_stats_recalc = True
     else:
-        sly.logger.info(
-            "The 'images_cache.json' file not exists. Stats will be recalculated."
-        )
+        sly.logger.info("The 'images_cache.json' file not exists. Stats will be recalculated.")
         force_stats_recalc = True
 
     sly.logger.info("The cache was pulled from team files")
@@ -231,13 +219,9 @@ def get_updated_images_and_classes(
 
     if set_A != set_B:
         if set_A.issubset(set_B):
-            sly.logger.warning(
-                f"The images with the following ids were added: {set_B - set_A}"
-            )
+            sly.logger.warning(f"The images with the following ids were added: {set_B - set_A}")
         elif set_B.issubset(set_A):
-            sly.logger.warning(
-                f"The images with the following ids were deleted: {set_A - set_B}"
-            )
+            sly.logger.warning(f"The images with the following ids were deleted: {set_A - set_B}")
             g.PROJ_IMAGES_CACHE = {
                 k: v for k, v in g.PROJ_IMAGES_CACHE.items() if k not in (set_A - set_B)
             }
@@ -274,9 +258,7 @@ def check_idxs_integrity(
 ) -> list:
     if sly.fs.dir_empty(curr_projectfs_dir):
         sly.logger.warning("The buffer is empty. Calculate full stats")
-        if any(
-            len(x) != d.items_count for x, d in zip(updated_images.values(), datasets)
-        ):
+        if any(len(x) != d.items_count for x, d in zip(updated_images.values(), datasets)):
             sly.logger.warning(
                 f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
             )  # TODO
@@ -301,13 +283,7 @@ def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
     for dataset in datasets:
         actual_ceil = math.ceil(dataset.items_count / g.CHUNK_SIZE)
         max_chunks = math.ceil(
-            len(
-                [
-                    path
-                    for path in npy_paths
-                    if f"_{dataset.id}_" in sly.fs.get_file_name(path)
-                ]
-            )
+            len([path for path in npy_paths if f"_{dataset.id}_" in sly.fs.get_file_name(path)])
             / num_stats
         )
         if actual_ceil < max_chunks:
@@ -340,9 +316,7 @@ def remove_junk(project, datasets, project_fs_dir):
         rm_cnt += 1
 
     for path in files_fs:
-        if (path.split("_")[-4] not in ds_ids) or (
-            f"_{project.id}_{g.CHUNK_SIZE}_" not in path
-        ):
+        if (path.split("_")[-4] not in ds_ids) or (f"_{project.id}_{g.CHUNK_SIZE}_" not in path):
             os.remove(path)
             rm_cnt += 1
 
@@ -409,9 +383,7 @@ def calculate_and_save_stats(
 
                 for batch_infos in sly.batched(images_chunk, 100):
                     batch_ids = [x.id for x in batch_infos]
-                    figures = g.api.image.figure.download(
-                        dataset_id, batch_ids, skip_geometry=True
-                    )
+                    figures = g.api.image.figure.download(dataset_id, batch_ids, skip_geometry=True)
                     for image in batch_infos:
                         for stat in stats:
                             stat.update2(image, figures.get(image.id, []))
@@ -419,9 +391,7 @@ def calculate_and_save_stats(
 
                 latest_datetime = get_latest_datetime(images_chunk)
                 for stat in stats:
-                    save_chunks(
-                        stat, chunk, project_fs_dir, tf_all_paths, latest_datetime
-                    )
+                    save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime)
                     stat.clean()
 
         if pbar.last_print_n < pbar.total:  # unlabeled images
@@ -443,16 +413,12 @@ def save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime):
     os.makedirs(savedir, exist_ok=True)
 
     tf_stat_chunks = [
-        path
-        for path in tf_all_paths
-        if (stat.basename_stem in path) and (chunk in path)
+        path for path in tf_all_paths if (stat.basename_stem in path) and (chunk in path)
     ]
 
     if len(tf_stat_chunks) > 0:
         timestamps = [get_file_name(path).split("_")[-1] for path in tf_stat_chunks]
-        datetime_objects = [
-            datetime.fromisoformat(timestamp) for timestamp in timestamps
-        ]
+        datetime_objects = [datetime.fromisoformat(timestamp) for timestamp in timestamps]
         if latest_datetime > sorted(datetime_objects, reverse=True)[0]:
             for path in list_files(savedir, [".npy"]):
                 if chunk in path:
@@ -474,16 +440,23 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             f.write(json_bytes)
 
     for stat in stats:
+        # sly.logger.info(f"### {stat.basename_stem}")
+        # tm = sly.TinyTimer()
         stat.sew_chunks(
             chunks_dir=f"{project_fs_dir}/{stat.basename_stem}/",
             updated_classes=updated_classes,
         )
-        # if sly.is_development():
-        #     stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
+        # sly.logger.info(f"chunks_sewed: {tm.get_sec()}")
+        if sly.is_development():
+            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
 
+        # tm = sly.TinyTimer()
         res = stat.to_json2()
+        # sly.logger.info(f"json_received: {tm.get_sec()}")
         if res is not None:
+            # tm = sly.TinyTimer()
             _save_to_json(res, f"{project_fs_dir}/{stat.basename_stem}.json")
+            # sly.logger.info(f"json_saved: {tm.get_sec()}")
 
 
 @sly.timeit
@@ -534,9 +507,7 @@ def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
     ) as pbar:
         g.api.file.upload_bulk(team_id, json_paths, dst_json_paths, pbar)
 
-    sly.logger.info(
-        f"{len(json_paths)} updated .json stats succesfully updated and uploaded"
-    )
+    sly.logger.info(f"{len(json_paths)} updated .json stats succesfully updated and uploaded")
 
 
 def remove_files_with_null(directory_path: str):
