@@ -12,7 +12,7 @@ from supervisely.io.fs import (
     get_file_size,
     list_files_recursively,
 )
-
+import threading
 from pathlib import Path
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -132,10 +132,13 @@ def main_func(project_id: int):
 
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
     # u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        executor.submit(
-            u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
-        )
+    sly.logger.info("Start threading")
+    my_thread = threading.Thread(
+        target=u.archive_chunks_and_upload,
+        args=(team.id, project, stats, tf_project_dir, project_fs_dir),
+    )
+    my_thread.start()
+
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
 
     u.push_cache(team.id, project_id, tf_cache_dir)
