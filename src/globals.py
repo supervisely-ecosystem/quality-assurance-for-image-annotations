@@ -18,12 +18,14 @@ api = sly.Api.from_env()
 STORAGE_DIR = sly.app.get_data_dir()
 TF_STATS_DIR = "/stats"
 
+
 PROJ_IMAGES_CACHE = {}
 IMAGES_CACHE = {}
 META_CACHE = {}
 # TF_OLD_CHUNKS = []
 
 CHUNKS_LATEST_DATETIME = None
+ACTIVE_REQUESTS = set()
 
 
 def initialize_global_cache():

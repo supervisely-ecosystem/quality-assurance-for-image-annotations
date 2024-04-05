@@ -54,6 +54,14 @@ def main_func(project_id: int):
 
     sly.logger.info("Start Quality Assurance.")
 
+    if project_id in g.ACTIVE_REQUESTS:
+        return JSONResponse(
+            {
+                "message": f"Request for the project with ID={project_id} is busy. Wait untill the previous one will be finished..."
+            }
+        )
+    g.ACTIVE_REQUESTS.add(project_id)
+
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
 
@@ -142,4 +150,5 @@ def main_func(project_id: int):
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project_id, tf_cache_dir)
 
+    g.ACTIVE_REQUESTS.remove(project_id)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
