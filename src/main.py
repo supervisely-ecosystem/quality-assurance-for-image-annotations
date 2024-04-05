@@ -40,6 +40,7 @@ def stats_endpoint(project_id: int):
     except Exception as e:
         msg = e.__class__.__name__ + ": " + str(e)
         sly.logger.error(msg)
+        g.ACTIVE_REQUESTS.remove(project_id)
         raise HTTPException(
             status_code=500,
             detail={
@@ -47,6 +48,7 @@ def stats_endpoint(project_id: int):
                 "message": msg,
             },
         ) from e
+
     return result
 
 
@@ -149,6 +151,5 @@ def main_func(project_id: int):
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project_id, tf_cache_dir)
-
     g.ACTIVE_REQUESTS.remove(project_id)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
