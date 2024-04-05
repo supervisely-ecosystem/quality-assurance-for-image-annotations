@@ -114,7 +114,7 @@ def main_func(project_id: int):
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
     updated_images = u.check_idxs_integrity(
-        project, datasets, stats, project_fs_dir, idx_to_infos, updated_images
+        project, datasets, stats, project_fs_dir, idx_to_infos, updated_images, force_stats_recalc
     )
 
     tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]

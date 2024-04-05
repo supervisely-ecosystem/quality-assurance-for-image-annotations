@@ -263,24 +263,28 @@ def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, 
 
 
 def check_idxs_integrity(
-    project, datasets, stats, curr_projectfs_dir, idx_to_infos, updated_images
+    project, datasets, stats, projectfs_dir, idx_to_infos, updated_images, force_stats_recalc
 ) -> list:
-    if sly.fs.dir_empty(curr_projectfs_dir):
+    if force_stats_recalc is True:
+        return get_project_images_all(datasets)
+
+    if sly.fs.dir_empty(projectfs_dir):
         sly.logger.warning("The buffer is empty. Calculate full stats")
         if any(len(x) != d.items_count for x, d in zip(updated_images.values(), datasets)):
+            total_updated = sum(len(lst) for lst in updated_images.values())
             sly.logger.warning(
-                f"The number of updated images ({len(updated_images)}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
+                f"The number of updated images ({total_updated}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
             )  # TODO
             return get_project_images_all(datasets)
     else:
         for stat in stats:
             files = sly.fs.list_files(
-                f"{curr_projectfs_dir}/{stat.basename_stem}",
+                f"{projectfs_dir}/{stat.basename_stem}",
                 [".npy"],
             )
 
             if len(files) != len(idx_to_infos.keys()):
-                msg = f"The number of images in the project has changed. Check chunks in Team Files: {curr_projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
+                msg = f"The number of images in the project has changed. Check chunks in Team Files: {projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
                 sly.logger.warning(msg)
                 # raise RuntimeError(msg)
                 return get_project_images_all(datasets)
@@ -343,7 +347,7 @@ def remove_junk(team_id, tf_project_dir, project, datasets, project_fs_dir):
             if tf_chunks_dt != g.CHUNKS_LATEST_DATETIME.isoformat():
                 g.api.file.remove_file(team_id, chunks)
                 sly.logger.info(
-                    f"The {chunks} old or junk chunks archive was detected and removed from the buffer"
+                    f"The {chunks} old or junk chunks archive was detected and removed from the team files."
                 )
 
 
