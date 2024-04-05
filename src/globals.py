@@ -21,7 +21,9 @@ TF_STATS_DIR = "/stats"
 PROJ_IMAGES_CACHE = {}
 IMAGES_CACHE = {}
 META_CACHE = {}
-TF_OLD_CHUNKS = []
+# TF_OLD_CHUNKS = []
+
+CHUNKS_LATEST_DATETIME = None
 
 
 def initialize_global_cache():

@@ -64,9 +64,14 @@ def pull_cache(team_id: int, project_id: int, tf_cache_dir: str, tf_project_dir:
             if smeta["chunk_size"] != g.CHUNK_SIZE:
                 sly.logger.warning("The chunk size has changed. Recalculating full stats...")
                 return True
+            ts = smeta["chunks_dt"][:-1]
+            g.CHUNKS_LATEST_DATETIME = datetime.fromisoformat(ts)
 
     if os.path.exists(path_meta):
         if g.META_CACHE.get(project_id) is None:
+            # TODO bug whwn delete clsas false recalc
+            # (not see project id in cache)
+            g.CHUNKS_LATEST_DATETIME
             sly.logger.info(
                 f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated."
             )
@@ -103,6 +108,7 @@ def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
     os.makedirs(local_cache_dir, exist_ok=True)
 
     ts = get_iso_timestamp()
+    chunks_dt = str(g.CHUNKS_LATEST_DATETIME.isoformat()) + "Z"
 
     stats_meta = {}
     spath = f"{local_cache_dir}/project_statistics_meta.json"
@@ -114,12 +120,14 @@ def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
         if smeta is not None:
             smeta["updated_at"] = ts
             smeta["chunk_size"] = g.CHUNK_SIZE
+            smeta["chunks_dt"] = chunks_dt
             stats_meta[str(project_id)] = smeta
         else:
             stats_meta[str(project_id)] = {
                 "updated_at": ts,
                 "created_at": ts,
                 "chunk_size": g.CHUNK_SIZE,
+                "chunks_dt": chunks_dt,
             }
 
         with open(spath, "w", encoding="utf-8") as f:
@@ -130,6 +138,7 @@ def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
                 "updated_at": ts,
                 "created_at": ts,
                 "chunk_size": g.CHUNK_SIZE,
+                "chunks_dt": chunks_dt,
             }
         }
         with open(spath, "w", encoding="utf-8") as f:
@@ -293,7 +302,7 @@ def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
     sly.logger.info("The consistency of data is OK")
 
 
-def remove_junk(project, datasets, project_fs_dir):
+def remove_junk(team_id, tf_project_dir, project, datasets, project_fs_dir):
     files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
     ds_ids, rm_cnt = [str(dataset.id) for dataset in datasets], 0
 
@@ -321,9 +330,21 @@ def remove_junk(project, datasets, project_fs_dir):
             rm_cnt += 1
 
     if rm_cnt > 0:
-        sly.logger.warning(
+        sly.logger.info(
             f"The {rm_cnt} old or junk chunk files were detected and removed from the buffer"
         )
+
+    chunks_archive = [
+        f for f in g.api.file.listdir(team_id, tf_project_dir) if f.endswith(".tar.gz")
+    ]
+    if len(chunks_archive) > 1:
+        for chunks in chunks_archive:
+            tf_chunks_dt = ".".join(sly.fs.get_file_name(chunks).split(".")[:-1]).split("_")[-1]
+            if tf_chunks_dt != g.CHUNKS_LATEST_DATETIME.isoformat():
+                g.api.file.remove_file(team_id, chunks)
+                sly.logger.info(
+                    f"The {chunks} old or junk chunks archive was detected and removed from the buffer"
+                )
 
 
 @sly.timeit
@@ -337,11 +358,29 @@ def download_stats_chunks_to_buffer(
     if force_stats_recalc:
         return True
 
-    archive_name = f"{project.id}_{project.name}_chunks.tar.gz"
+    if g.CHUNKS_LATEST_DATETIME is None:
+        sly.logger.warning(
+            "The chunks identifier of latest datetime is not existed.  Recalculating full stats."
+        )
+        return True
+    cached_chunks_dt = g.CHUNKS_LATEST_DATETIME.isoformat()
+    archive_name = f"{project.id}_{project.name}_chunks_{cached_chunks_dt}.tar.gz"
     src_path = f"{tf_project_dir}/{archive_name}"
     dst_path = f"{project_fs_dir}/{archive_name}"
 
     file = g.api.file.get_info_by_path(team_id, src_path)
+    if file is None:
+        sly.logger.warning(
+            f"The chunks archive file is not existed: '{archive_name}'.  Recalculating full stats."
+        )
+        return True
+    tf_chunks_dt = ".".join(sly.fs.get_file_name(file.path).split(".")[:-1]).split("_")[-1]
+    if cached_chunks_dt != tf_chunks_dt:
+        sly.logger.warning(
+            f"The chunks datetime '{tf_chunks_dt}' differs from the cached one: '{cached_chunks_dt}'.  Recalculating full stats."
+        )
+        return True
+
     with tqdm(
         desc="Downloading stats chunks to buffer",
         total=file.sizeb,
@@ -390,6 +429,8 @@ def calculate_and_save_stats(
                     pbar.update(len(batch_infos))
 
                 latest_datetime = get_latest_datetime(images_chunk)
+                if g.CHUNKS_LATEST_DATETIME is None or g.CHUNKS_LATEST_DATETIME < latest_datetime:
+                    g.CHUNKS_LATEST_DATETIME = latest_datetime
                 for stat in stats:
                     save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime)
                     stat.clean()
@@ -475,7 +516,8 @@ def archive_chunks_and_upload(
 
     folders_to_compress = [f"{project_fs_dir}/{stat.basename_stem}" for stat in stats]
 
-    archive_name = f"{project.id}_{project.name}_chunks.tar.gz"
+    dt_identifier = g.CHUNKS_LATEST_DATETIME
+    archive_name = f"{project.id}_{project.name}_chunks_{dt_identifier.isoformat()}.tar.gz"
     src_path = f"{project_fs_dir}/{archive_name}"
     archive_sizeb = _compress_folders(folders_to_compress, src_path)
 

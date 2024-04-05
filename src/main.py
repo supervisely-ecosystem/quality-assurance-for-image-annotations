@@ -110,7 +110,7 @@ def main_func(project_id: int):
             team.id, project, tf_project_dir, project_fs_dir, force_stats_recalc
         )
 
-    u.remove_junk(project, datasets, project_fs_dir)
+    # u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
     updated_images = u.check_idxs_integrity(
@@ -128,7 +128,7 @@ def main_func(project_id: int):
         infos_to_idx,
     )
     sly.logger.info("Stats calculation finished.")
-    u.remove_junk(project, datasets, project_fs_dir)
+    u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
 
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
     # u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
