@@ -69,9 +69,6 @@ def pull_cache(team_id: int, project_id: int, tf_cache_dir: str, tf_project_dir:
 
     if os.path.exists(path_meta):
         if g.META_CACHE.get(project_id) is None:
-            # TODO bug whwn delete clsas false recalc
-            # (not see project id in cache)
-            g.CHUNKS_LATEST_DATETIME
             sly.logger.info(
                 f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated."
             )
@@ -492,8 +489,8 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             updated_classes=updated_classes,
         )
         # sly.logger.info(f"chunks_sewed: {tm.get_sec()}")
-        if sly.is_development():
-            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
+        # if sly.is_development():
+        #     stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
 
         # tm = sly.TinyTimer()
         res = stat.to_json2()
