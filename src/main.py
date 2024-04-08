@@ -1,3 +1,5 @@
+import multiprocessing
+import multiprocessing.process
 import os
 import src.globals as g
 import src.utils as u
@@ -41,12 +43,17 @@ def clean_set():
 
 @server.get("/get-stats")
 def stats_endpoint(project_id: int):
-    try:
-        result = main_func(project_id)
-    except Exception as e:
+    q = multiprocessing.Queue()
+    prcs = multiprocessing.Process(target=_run_in_process, args=(project_id, q), daemon=True)
+    prcs.start()
+    prcs.join()
+    result = q.get()
+    if isinstance(result, Exception):
+        e = result
         msg = e.__class__.__name__ + ": " + str(e)
         sly.logger.error(msg)
-        g.ACTIVE_REQUESTS.remove(project_id)
+        # if project_id in g.ACTIVE_REQUESTS:
+        #     g.ACTIVE_REQUESTS.remove(project_id)
         raise HTTPException(
             status_code=500,
             detail={
@@ -54,16 +61,22 @@ def stats_endpoint(project_id: int):
                 "message": msg,
             },
         ) from e
-
     return result
 
 
+def _run_in_process(project_id, q: multiprocessing.Queue):
+    try:
+        result = main_func(project_id)
+        q.put(result)
+    except Exception as e:
+        q.put(e)
+
 def main_func(project_id: int):
 
-    if project_id in g.ACTIVE_REQUESTS:
-        msg = f"Request for the project with ID={project_id} is busy. Wait untill the previous one will be finished..."
-        sly.logger.info(msg)
-    g.ACTIVE_REQUESTS.add(project_id)
+    # if project_id in g.ACTIVE_REQUESTS:
+    #     msg = f"Request for the project with ID={project_id} is busy. Wait untill the previous one will be finished..."
+    #     sly.logger.info(msg)
+    # g.ACTIVE_REQUESTS.add(project_id)
 
     sly.logger.info("Start Quality Assurance.")
 
@@ -108,13 +121,13 @@ def main_func(project_id: int):
     updated_images, updated_classes = u.get_updated_images_and_classes(
         project, project_meta, datasets, force_stats_recalc
     )
-    total_updated = sum(len(lst) for lst in updated_images.values())
-    if total_updated == 0:
-        sly.logger.info("Nothing to update. Skipping stats calculation...")
-        g.ACTIVE_REQUESTS.remove(project_id)
-        return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
+    # if total_updated == 0:
+    #     sly.logger.info("Nothing to update. Skipping stats calculation...")
+    #     g.ACTIVE_REQUESTS.remove(project_id)
+    #     return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
-    # updated_images = u.get_project_images_all(project, datasets)  # !tmp
+    updated_images = u.get_project_images_all(datasets)  # !tmp
+    total_updated = sum(len(lst) for lst in updated_images.values())
 
     if (
         g.api.file.dir_exists(team.id, tf_project_dir) is True
@@ -155,5 +168,5 @@ def main_func(project_id: int):
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project_id, tf_cache_dir)
-    g.ACTIVE_REQUESTS.remove(project_id)
+    # g.ACTIVE_REQUESTS.remove(project_id)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})

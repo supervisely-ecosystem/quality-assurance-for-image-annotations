@@ -108,7 +108,7 @@ def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
     chunks_dt = str(g.CHUNKS_LATEST_DATETIME.isoformat()) + "Z"
 
     stats_meta = {}
-    spath = f"{local_cache_dir}/project_statistics_meta.json"
+    spath = f"{local_cache_dir}/project_statistics_meta{sly.rand_str(5)}.json"
     if os.path.exists(spath):
         with open(spath, "r", encoding="utf-8") as f:
             stats_meta = json.load(f)
