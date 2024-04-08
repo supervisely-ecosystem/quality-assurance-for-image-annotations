@@ -8,7 +8,7 @@
   "icon_cover": true,
   "poster": "https://user-images.githubusercontent.com/12828725/182181033-d0d1a690-8388-472e-8862-e0cacbd4f082.png",
   "headless": false,
-  "entrypoint": "python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --log-level warning --workers 4",
+  "entrypoint": "python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --log-level warning",
   "port": 8000,
   "docker_image": "supervisely/base-py-sdk:6.73.46"
 }

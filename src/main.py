@@ -54,15 +54,13 @@ def stats_endpoint(project_id: int):
 
 def main_func(project_id: int):
 
-    sly.logger.info("Start Quality Assurance.")
-
     if project_id in g.ACTIVE_REQUESTS:
-        return JSONResponse(
-            {
-                "message": f"Request for the project with ID={project_id} is busy. Wait untill the previous one will be finished..."
-            }
-        )
+        msg = f"Request for the project with ID={project_id} is busy. Wait untill the previous one will be finished..."
+        sly.logger.info(msg)
+        return JSONResponse({"message": msg})
     g.ACTIVE_REQUESTS.add(project_id)
+
+    sly.logger.info("Start Quality Assurance.")
 
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
