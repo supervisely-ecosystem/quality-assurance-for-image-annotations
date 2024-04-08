@@ -33,6 +33,12 @@ def test_ping():
     return JSONResponse("ping")
 
 
+@server.get("/clean-active-requests")
+def clean_set():
+    g.ACTIVE_REQUESTS = set()
+    return JSONResponse({"message": "The set of active requests has been cleaned."})
+
+
 @server.get("/get-stats")
 def stats_endpoint(project_id: int):
     try:
@@ -106,6 +112,7 @@ def main_func(project_id: int):
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
+        g.ACTIVE_REQUESTS.remove(project_id)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
     # updated_images = u.get_project_images_all(project, datasets)  # !tmp
