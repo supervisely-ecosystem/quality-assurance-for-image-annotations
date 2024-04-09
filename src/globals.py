@@ -25,7 +25,8 @@ META_CACHE = {}
 # TF_OLD_CHUNKS = []
 
 CHUNKS_LATEST_DATETIME = None
-ACTIVE_REQUESTS = set()
+ACTIVE_REQUESTS_DIR = f"{STORAGE_DIR}/_active_requests"
+sly.fs.mkdir(ACTIVE_REQUESTS_DIR, remove_content_if_exists=True)
 
 
 def initialize_global_cache():

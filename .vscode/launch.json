@@ -15,8 +15,6 @@
                 "--ws",
                 "websockets",
                 "--reload",
-                "--workers", 
-                "4"
             ],
             "jinja": true,
             "justMyCode": false,

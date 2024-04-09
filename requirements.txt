@@ -7,3 +7,4 @@ git+https://github.com/supervisely/supervisely.git@wrap-figures-list
 git+https://github.com/supervisely/dataset-tools.git@main
 humanize
 ujson
+fastapi_utils

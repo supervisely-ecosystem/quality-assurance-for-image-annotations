@@ -16,7 +16,7 @@ import threading
 from pathlib import Path
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
-
+from fastapi_utils.tasks import repeat_every
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
 from concurrent.futures import ThreadPoolExecutor
@@ -33,10 +33,17 @@ def test_ping():
     return JSONResponse("ping")
 
 
+@server.on_event("startup")
+@repeat_every(seconds=60 * 60)  # 1 hour
+def clean_active_requests() -> None:
+    sly.fs.clean_dir(g.ACTIVE_REQUESTS_DIR)
+    sly.logger.debug(f"The '{g.ACTIVE_REQUESTS_DIR}' has been cleaned with a scheduler.")
+
+
 @server.get("/clean-active-requests")
 def clean_set():
-    g.ACTIVE_REQUESTS = set()
-    return JSONResponse({"message": "The set of active requests has been cleaned."})
+    sly.fs.clean_dir(g.ACTIVE_REQUESTS_DIR)
+    sly.logger.debug(f"The '{g.ACTIVE_REQUESTS_DIR}' has been cleaned manually.")
 
 
 @server.get("/get-stats")
@@ -46,7 +53,8 @@ def stats_endpoint(project_id: int):
     except Exception as e:
         msg = e.__class__.__name__ + ": " + str(e)
         sly.logger.error(msg)
-        g.ACTIVE_REQUESTS.remove(project_id)
+        active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
+        sly.fs.silent_remove(active_project_path)
         raise HTTPException(
             status_code=500,
             detail={
@@ -60,10 +68,12 @@ def stats_endpoint(project_id: int):
 
 def main_func(project_id: int):
 
-    if project_id in g.ACTIVE_REQUESTS:
+    active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
+    if os.path.isfile(active_project_path):
         msg = f"Request for the project with ID={project_id} is busy. Wait untill the previous one will be finished..."
         sly.logger.info(msg)
-    g.ACTIVE_REQUESTS.add(project_id)
+        return JSONResponse({"message": msg}, 503)
+    Path(active_project_path).touch()
 
     sly.logger.info("Start Quality Assurance.")
 
@@ -111,7 +121,7 @@ def main_func(project_id: int):
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
-        g.ACTIVE_REQUESTS.remove(project_id)
+        sly.fs.silent_remove(active_project_path)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
     # updated_images = u.get_project_images_all(project, datasets)  # !tmp
@@ -146,7 +156,7 @@ def main_func(project_id: int):
 
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
     # u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
-    # sly.logger.info("Start threading")
+    sly.logger.debug("Start threading")
     thread = threading.Thread(
         target=u.archive_chunks_and_upload,
         args=(team.id, project, stats, tf_project_dir, project_fs_dir),
@@ -155,5 +165,5 @@ def main_func(project_id: int):
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project_id, tf_cache_dir)
-    g.ACTIVE_REQUESTS.remove(project_id)
+    sly.fs.silent_remove(active_project_path)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
