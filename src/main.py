@@ -23,7 +23,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 layout = Container(widgets=[card_1], direction="vertical")
 static_dir = Path(g.STORAGE_DIR)
-app = sly.Application(layout=layout, static_dir=static_dir)
+# app = sly.Application(layout=layout, static_dir=static_dir)
+app = sly.Application()
 server = app.get_server()
 
 
