@@ -28,10 +28,12 @@ from supervisely.io.fs import (
 def _load_json_cache(path_img, path_meta):
     if os.path.exists(path_img):
         with open(path_img, "r", encoding="utf-8") as f:
-            g.IMAGES_CACHE = json.load(f)
+            tmp = json.load(f)
+            g.IMAGES_CACHE.update(tmp)
     if os.path.exists(path_meta):
         with open(path_meta, "r", encoding="utf-8") as f:
-            g.META_CACHE = {int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()}
+            tmp = {int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()}
+            g.META_CACHE.update(tmp)
 
 
 def pull_cache(team_id: int, project_id: int, tf_cache_dir: str, tf_project_dir: str) -> bool:

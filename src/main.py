@@ -70,6 +70,8 @@ def _remove_old_active_project_request(now, team, file):
 
 def main_func(project_id: int):
 
+    sly.logger.debug("Checking requests...")
+
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
 
