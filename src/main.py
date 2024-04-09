@@ -12,6 +12,7 @@ from supervisely.io.fs import (
     get_file_size,
     list_files_recursively,
 )
+import time
 import threading
 from pathlib import Path
 from fastapi import HTTPException
@@ -71,9 +72,15 @@ def main_func(project_id: int):
 
     active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
     if os.path.isfile(active_project_path):
-        msg = f"Request for the project with ID={project_id} is busy. Wait untill the previous one will be finished..."
+        msg = f"Request for the project with ID={project_id} is busy. Wait until the previous one will be finished..."
         sly.logger.info(msg)
-        return JSONResponse({"message": msg}, 200)
+        while True:
+            if os.path.isfile(active_project_path):
+                time.sleep(5)
+            else:
+                break
+        return JSONResponse({"message": msg})
+
     Path(active_project_path).touch()
 
     sly.logger.info("Start Quality Assurance.")
