@@ -12,6 +12,7 @@ from supervisely.io.fs import (
     get_file_size,
     list_files_recursively,
 )
+from datetime import datetime, timezone
 import time
 import threading
 from pathlib import Path
@@ -35,17 +36,7 @@ def test_ping():
     return JSONResponse("ping")
 
 
-@server.on_event("startup")
-@repeat_every(seconds=60 * 60)  # 1 hour
-def clean_active_requests() -> None:
-    sly.fs.clean_dir(g.ACTIVE_REQUESTS_DIR)
-    sly.logger.debug(f"The '{g.ACTIVE_REQUESTS_DIR}' has been cleaned with a scheduler.")
-
-
-@server.get("/clean-active-requests")
-def clean_set():
-    sly.fs.clean_dir(g.ACTIVE_REQUESTS_DIR)
-    sly.logger.debug(f"The '{g.ACTIVE_REQUESTS_DIR}' has been cleaned manually.")
+TIMELOCK_LIMIT = 100  # seconds
 
 
 @server.get("/get-stats")
@@ -68,25 +59,43 @@ def stats_endpoint(project_id: int):
     return result
 
 
+def _remove_old_active_project_request(now, team, file):
+    dt = datetime.fromisoformat(file.updated_at[:-1]).replace(tzinfo=timezone.utc)
+    if (now - dt).seconds > TIMELOCK_LIMIT:
+        g.api.file.remove(team.id, file.path)
+        sly.logger.debug(
+            f"The temporary file {file.path!r} has been removed from tf because of time limit ({TIMELOCK_LIMIT} secs). TEAM_ID={team.id}"
+        )
+
+
 def main_func(project_id: int):
-
-    active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
-    if os.path.isfile(active_project_path):
-        msg = f"Request for the project with ID={project_id} is busy. Wait until the previous one will be finished..."
-        sly.logger.info(msg)
-        while True:
-            if os.path.isfile(active_project_path):
-                time.sleep(5)
-            else:
-                break
-        return JSONResponse({"message": msg})
-
-    Path(active_project_path).touch()
-
-    sly.logger.info("Start Quality Assurance.")
 
     project = g.api.project.get_info_by_id(project_id, raise_error=True)
     team = g.api.team.get_info_by_id(project.team_id)
+
+    active_project_path_local = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
+    active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
+
+    file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
+    if file is not None:
+        now = datetime.now(timezone.utc)
+        _remove_old_active_project_request(now, team, file)
+        if g.api.file.exists(team.id, file.path) is True:
+            msg = f"Request for the project with ID={project_id} is busy. Wait until the previous one will be finished..."
+            sly.logger.info(msg)
+            while True:
+                if g.api.file.exists(team.id, active_project_path_tf):
+                    now = datetime.now(timezone.utc)
+                    _remove_old_active_project_request(now, team, file)
+                    time.sleep(5)
+                else:
+                    break
+            return JSONResponse({"message": msg})
+
+    Path(active_project_path_local).touch()
+    g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
+
+    sly.logger.info("Start Quality Assurance.")
 
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
     tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
@@ -129,7 +138,8 @@ def main_func(project_id: int):
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
-        sly.fs.silent_remove(active_project_path)
+        # sly.fs.silent_remove(active_project_path)
+        g.api.file.remove(team.id, active_project_path_tf)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
     # updated_images = u.get_project_images_all(project, datasets)  # !tmp
@@ -173,5 +183,6 @@ def main_func(project_id: int):
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project_id, tf_cache_dir)
-    sly.fs.silent_remove(active_project_path)
+    # sly.fs.silent_remove(active_project_path)
+    g.api.file.remove(team.id, active_project_path_tf)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
