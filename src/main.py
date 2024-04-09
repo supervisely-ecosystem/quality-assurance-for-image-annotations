@@ -23,8 +23,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 layout = Container(widgets=[card_1], direction="vertical")
 static_dir = Path(g.STORAGE_DIR)
-# app = sly.Application(layout=layout, static_dir=static_dir)
-app = sly.Application()
+app = sly.Application(layout=layout, static_dir=static_dir)
+# app = sly.Application()
 server = app.get_server()
 
 
@@ -73,7 +73,7 @@ def main_func(project_id: int):
     if os.path.isfile(active_project_path):
         msg = f"Request for the project with ID={project_id} is busy. Wait untill the previous one will be finished..."
         sly.logger.info(msg)
-        return JSONResponse({"message": msg}, 503)
+        return JSONResponse({"message": msg}, 200)
     Path(active_project_path).touch()
 
     sly.logger.info("Start Quality Assurance.")
