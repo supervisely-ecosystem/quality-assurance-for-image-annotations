@@ -44,7 +44,6 @@ def _get_extra(user_id, team, project) -> dict:
     else:
         if user_id is not None:
             return {"USER_ID": user_id, "TEAM_ID": team.id, "PROJECT_ID": project.id}
-        return {"TEAM_ID": team.id, "PROJECT_ID": project.id}
     return None
 
 
