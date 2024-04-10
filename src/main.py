@@ -2,8 +2,7 @@ import os
 import src.globals as g
 import src.utils as u
 import supervisely as sly
-import asyncio
-import concurrent.futures
+from supervisely import ProjectInfo, TeamInfo
 import dataset_tools as dtools
 from supervisely.io.fs import (
     get_file_name_with_ext,
@@ -20,7 +19,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
-from concurrent.futures import ThreadPoolExecutor
+
 
 layout = Container(widgets=[card_1], direction="vertical")
 static_dir = Path(g.STORAGE_DIR)
@@ -38,15 +37,36 @@ def test_ping():
 TIMELOCK_LIMIT = 100  # seconds
 
 
+def _get_extra(user_id, team, project) -> dict:
+    if project is None or team is None:
+        if user_id is not None:
+            return {"USER_ID": user_id}
+    else:
+        if user_id is not None:
+            return {"USER_ID": user_id, "TEAM_ID": team.id, "PROJECT_ID": project.id}
+    return None
+
+
 @server.get("/get-stats")
-def stats_endpoint(project_id: int):
+def stats_endpoint(project_id: int, user_id: int = None):
+
+    project = None
+    team = None
+
     try:
-        result = main_func(project_id)
+        project = g.api.project.get_info_by_id(project_id, raise_error=True)
+        team = g.api.team.get_info_by_id(project.team_id, raise_error=True)
+
+        result = main_func(team, project)
+
     except Exception as e:
         msg = e.__class__.__name__ + ": " + str(e)
-        sly.logger.error(msg)
+        xtr = _get_extra(user_id, team, project)
+        sly.logger.error(msg, extra=xtr)
+
         active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
         sly.fs.silent_remove(active_project_path)
+
         raise HTTPException(
             status_code=500,
             detail={
@@ -67,22 +87,19 @@ def _remove_old_active_project_request(now, team, file):
         )
 
 
-def main_func(project_id: int):
+def main_func(team: TeamInfo, project: ProjectInfo):
 
     sly.logger.debug("Checking requests...")
 
-    project = g.api.project.get_info_by_id(project_id, raise_error=True)
-    team = g.api.team.get_info_by_id(project.team_id)
-
-    active_project_path_local = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
-    active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
+    active_project_path_local = f"{g.ACTIVE_REQUESTS_DIR}/{project.id}"
+    active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project.id}"
 
     file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
     if file is not None:
         now = datetime.now(timezone.utc)
         _remove_old_active_project_request(now, team, file)
         if g.api.file.exists(team.id, file.path) is True:
-            msg = f"Request for the project with ID={project_id} is busy. Wait until the previous one will be finished..."
+            msg = f"Request for the project with ID={project.id} is busy. Wait until the previous one will be finished..."
             sly.logger.info(msg)
             while True:
                 if g.api.file.exists(team.id, active_project_path_tf):
@@ -99,23 +116,23 @@ def main_func(project_id: int):
     sly.logger.info("Start Quality Assurance.")
 
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
-    tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
+    tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
 
     g.initialize_global_cache()
-    force_stats_recalc = u.pull_cache(team.id, project_id, tf_cache_dir, tf_project_dir)
+    force_stats_recalc = u.pull_cache(team.id, project.id, tf_cache_dir, tf_project_dir)
 
-    json_project_meta = g.api.project.get_meta(project_id)
+    json_project_meta = g.api.project.get_meta(project.id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
 
     sly.logger.info(f"Processing for the '{project.name}' project")
-    sly.logger.info(f"with the PROJECT_ID={project_id}")
+    sly.logger.info(f"with the PROJECT_ID={project.id}")
     sly.logger.info(f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
     sly.logger.info(
         f"The project consists of {project.items_count} images and has {project.datasets_count} datasets"
     )
 
-    datasets = g.api.dataset.get_list(project_id)
-    project_stats = g.api.project.get_stats(project_id)
+    datasets = g.api.dataset.get_list(project.id)
+    project_stats = g.api.project.get_stats(project.id)
 
     cache = {}
     stats = [
@@ -128,7 +145,7 @@ def main_func(project_id: int):
         dtools.ClassesTreemap(project_meta),
     ]
 
-    project_fs_dir = f"{g.STORAGE_DIR}/{project_id}_{project.name}"
+    project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
     if sly.fs.dir_exists(project_fs_dir):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
@@ -155,7 +172,7 @@ def main_func(project_id: int):
 
     # u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
 
-    idx_to_infos, infos_to_idx = u.get_indexes_dct(project_id, datasets)
+    idx_to_infos, infos_to_idx = u.get_indexes_dct(project.id, datasets)
     updated_images = u.check_idxs_integrity(
         project, datasets, stats, project_fs_dir, idx_to_infos, updated_images, force_stats_recalc
     )
@@ -183,7 +200,7 @@ def main_func(project_id: int):
     thread.start()
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
-    u.push_cache(team.id, project_id, tf_cache_dir)
+    u.push_cache(team.id, project.id, tf_cache_dir)
     # sly.fs.silent_remove(active_project_path)
     g.api.file.remove(team.id, active_project_path_tf)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
