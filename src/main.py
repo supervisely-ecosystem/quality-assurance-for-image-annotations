@@ -47,7 +47,7 @@ def _get_extra(user_id, team, project) -> dict:
 
 
 @server.get("/get-stats")
-def stats_endpoint(project_id: int, user_id=None):
+def stats_endpoint(project_id: int, user_id: int = None):
 
     project = None
     team = None
