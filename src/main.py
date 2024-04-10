@@ -18,7 +18,6 @@ import threading
 from pathlib import Path
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
-from fastapi_utils.tasks import repeat_every
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
 from concurrent.futures import ThreadPoolExecutor

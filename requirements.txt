@@ -7,4 +7,3 @@
 dataset-tools==0.0.49
 humanize
 ujson
-# fastapi_utils
