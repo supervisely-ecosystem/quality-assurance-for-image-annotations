@@ -98,6 +98,8 @@ def main_func(project_id: int):
 
     sly.logger.info("Start Quality Assurance.")
 
+    1 / 0
+
     tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
     tf_project_dir = f"{g.TF_STATS_DIR}/{project_id}_{project.name}"
 
