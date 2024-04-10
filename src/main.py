@@ -91,6 +91,8 @@ def main_func(team: TeamInfo, project: ProjectInfo):
 
     sly.logger.debug("Checking requests...")
 
+    1 / 0
+
     active_project_path_local = f"{g.ACTIVE_REQUESTS_DIR}/{project.id}"
     active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project.id}"
 
