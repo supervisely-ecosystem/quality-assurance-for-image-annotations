@@ -25,17 +25,6 @@ from supervisely.io.fs import (
 )
 
 
-# def _load_json_cache(path_img, path_meta):
-#     if os.path.exists(path_img):
-#         with open(path_img, "r", encoding="utf-8") as f:
-#             tmp = json.load(f)
-#             g.IMAGES_CACHE.update(tmp)
-#     if os.path.exists(path_meta):
-#         with open(path_meta, "r", encoding="utf-8") as f:
-#             tmp = {int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()}
-#             g.META_CACHE.update(tmp)
-
-
 def pull_cache(
     team_id: int, project_id: int, tf_project_dir: str, project_fs_dir: str
 ) -> Tuple[bool, dict]:
@@ -46,10 +35,9 @@ def pull_cache(
         return True, _cache
 
     filename = f"{project_id}_cache.json"
-    tf_cache_path = f"{project_id}/_cache/{filename}"
+    tf_cache_path = f"{tf_project_dir}/_cache/{filename}"
 
-    local_cache_dir = f"{project_fs_dir}/_cache"
-    local_cache_path = f"{local_cache_dir}/{filename}"
+    local_cache_path = f"{project_fs_dir}/_cache/{filename}"
 
     if g.api.file.exists(team_id, tf_cache_path):
         g.api.file.download(team_id, tf_cache_path, local_cache_path)
@@ -93,9 +81,10 @@ def pull_cache(
         g.CHUNKS_LATEST_DATETIME = datetime.fromisoformat(chunks_dt[:-1])
 
     sly.logger.info(f"The cache file {filename!r} was pulled from team files")
-    _cache["images"] = images
-    _cache["meta"] = meta
+
     _cache["stats_meta"] = smeta
+    _cache["meta"] = meta
+    _cache["images"] = {int(k): v for k, v in images.items()}
     return False, _cache
 
 
@@ -137,6 +126,10 @@ def push_cache(
 
     g.api.file.upload(team_id, local_cache_path, tf_cache_path)
     sly.logger.info(f"The cache file {filename!r} was pushed to team files")
+
+    # remove old junk
+    g.api.file.remove_dir(team_id, f"{os.path.dirname(tf_project_dir)}/_cache/", silent=True)
+
     return _cache
 
 
