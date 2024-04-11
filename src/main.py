@@ -115,14 +115,18 @@ def main_func(team: TeamInfo, project: ProjectInfo):
 
     sly.logger.info("Start Quality Assurance.")
 
-    tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
+    # tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
     tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
+    # tf_cache_dir = f"{tf_project_dir}/{}"
+    project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
 
-    g.initialize_global_cache()
-    force_stats_recalc = u.pull_cache(team.id, project.id, tf_cache_dir, tf_project_dir)
+    # g.initialize_global_cache()
+    force_stats_recalc, _cache = u.pull_cache(team.id, project.id, tf_project_dir, project_fs_dir)
 
     json_project_meta = g.api.project.get_meta(project.id)
     project_meta = sly.ProjectMeta.from_json(json_project_meta)
+    datasets = g.api.dataset.get_list(project.id)
+    project_stats = g.api.project.get_stats(project.id)
 
     sly.logger.info(f"Processing for the '{project.name}' project")
     sly.logger.info(f"with the PROJECT_ID={project.id}")
@@ -131,27 +135,22 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         f"The project consists of {project.items_count} images and has {project.datasets_count} datasets"
     )
 
-    datasets = g.api.dataset.get_list(project.id)
-    project_stats = g.api.project.get_stats(project.id)
-
-    cache = {}
     stats = [
-        dtools.ClassBalance(project_meta, project_stats, stat_cache=cache),
+        dtools.ClassBalance(project_meta, project_stats),
         dtools.ClassCooccurrence(project_meta),
-        dtools.ClassesPerImage(project_meta, project_stats, datasets, stat_cache=cache),
+        dtools.ClassesPerImage(project_meta, project_stats, datasets),
         dtools.ObjectsDistribution(project_meta),
         dtools.ObjectSizes(project_meta, project_stats),
         dtools.ClassSizes(project_meta),
         dtools.ClassesTreemap(project_meta),
     ]
 
-    project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
     if sly.fs.dir_exists(project_fs_dir):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
-    updated_images, updated_classes = u.get_updated_images_and_classes(
-        project, project_meta, datasets, force_stats_recalc
+    updated_images, updated_classes, _cache = u.get_updated_images_and_classes(
+        project, project_meta, datasets, force_stats_recalc, _cache
     )
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
@@ -200,7 +199,7 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     thread.start()
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
-    u.push_cache(team.id, project.id, tf_cache_dir)
+    u.push_cache(team.id, project.id, tf_project_dir, project_fs_dir, _cache)
     # sly.fs.silent_remove(active_project_path)
     g.api.file.remove(team.id, active_project_path_tf)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})

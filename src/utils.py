@@ -2,7 +2,7 @@ import json, time
 import tarfile
 import os
 import math
-from typing import List, Literal, Optional, Dict, Tuple
+from typing import List, Literal, Optional, Dict, Tuple, Union
 import dataset_tools as dtools
 from dataset_tools.image.stats.basestats import BaseStats
 from datetime import datetime
@@ -25,74 +25,78 @@ from supervisely.io.fs import (
 )
 
 
-def _load_json_cache(path_img, path_meta):
-    if os.path.exists(path_img):
-        with open(path_img, "r", encoding="utf-8") as f:
-            tmp = json.load(f)
-            g.IMAGES_CACHE.update(tmp)
-    if os.path.exists(path_meta):
-        with open(path_meta, "r", encoding="utf-8") as f:
-            tmp = {int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()}
-            g.META_CACHE.update(tmp)
+# def _load_json_cache(path_img, path_meta):
+#     if os.path.exists(path_img):
+#         with open(path_img, "r", encoding="utf-8") as f:
+#             tmp = json.load(f)
+#             g.IMAGES_CACHE.update(tmp)
+#     if os.path.exists(path_meta):
+#         with open(path_meta, "r", encoding="utf-8") as f:
+#             tmp = {int(k): sly.ProjectMeta().from_json(v) for k, v in json.load(f).items()}
+#             g.META_CACHE.update(tmp)
 
 
-def pull_cache(team_id: int, project_id: int, tf_cache_dir: str, tf_project_dir: str) -> bool:
-    force_stats_recalc = False
-
-    local_cache_dir = f"{g.STORAGE_DIR}/_cache"
-    if sly.fs.dir_exists(local_cache_dir):
-        sly.fs.clean_dir(local_cache_dir)
-    if g.api.file.dir_exists(team_id, tf_project_dir):
-        g.api.file.download_directory(team_id, tf_cache_dir, local_cache_dir)
-
-    path_img = os.path.join(local_cache_dir, "images_cache.json")
-    path_meta = os.path.join(local_cache_dir, "meta_cache.json")
-    _load_json_cache(path_img, path_meta)
-
-    if not g.api.file.dir_exists(team_id, tf_cache_dir):
-        sly.logger.warning("The cache directory not exists in team files. ")
-        return True
+def pull_cache(
+    team_id: int, project_id: int, tf_project_dir: str, project_fs_dir: str
+) -> Tuple[bool, dict]:
+    _cache = {}
 
     if not g.api.file.dir_exists(team_id, tf_project_dir):
         sly.logger.warning("The project directory not exists in team files.")
-        return True
+        return True, _cache
 
-    spath = f"{local_cache_dir}/project_statistics_meta.json"
-    if os.path.exists(spath):
-        with open(spath, "r", encoding="utf-8") as f:
-            stats_meta = json.load(f)
-        smeta = stats_meta.get(str(project_id))
-        if smeta is not None:
-            if smeta["chunk_size"] != g.CHUNK_SIZE:
-                sly.logger.warning("The chunk size has changed. Recalculating full stats...")
-                return True
-            ts = smeta["chunks_dt"][:-1]
-            g.CHUNKS_LATEST_DATETIME = datetime.fromisoformat(ts)
+    filename = f"{project_id}_cache.json"
+    tf_cache_path = f"{project_id}/_cache/{filename}"
 
-    if os.path.exists(path_meta):
-        if g.META_CACHE.get(project_id) is None:
-            sly.logger.info(
-                f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated."
-            )
-            force_stats_recalc = True
+    local_cache_dir = f"{project_fs_dir}/_cache"
+    local_cache_path = f"{local_cache_dir}/{filename}"
+
+    if g.api.file.exists(team_id, tf_cache_path):
+        g.api.file.download(team_id, tf_cache_path, local_cache_path)
     else:
-        sly.logger.warning("The 'meta_cache.json' file not exists. Stats will be recalculated.")
-        force_stats_recalc = True
+        sly.logger.warning(f"The {filename!r} not exists in team files.")
+        return True, _cache
 
-    if os.path.exists(path_img):
-        if g.IMAGES_CACHE.get(str(project_id)) is not None:
-            g.PROJ_IMAGES_CACHE = {int(k): v for k, v in g.IMAGES_CACHE[str(project_id)].items()}
-        else:
-            sly.logger.info(
-                f"The key with project ID={project_id} was not found in 'images_cache.json'. Stats will be fully recalculated."
-            )
-            force_stats_recalc = True
+    if os.path.exists(local_cache_path):
+        with open(local_cache_path, "r", encoding="utf-8") as f:
+            _cache = json.load(f)
+
+    images = _cache.get("images")
+    meta = _cache.get("meta")
+    smeta = _cache.get("stats_meta")
+
+    if images is None:
+        sly.logger.info(
+            f"The key with project ID={project_id} was not found in 'images_cache.json'. Stats will be fully recalculated."
+        )
+        return True, _cache
+
+    if meta is None:
+        sly.logger.info(
+            f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated."
+        )
+        return True, _cache
     else:
-        sly.logger.info("The 'images_cache.json' file not exists. Stats will be recalculated.")
-        force_stats_recalc = True
+        meta = sly.ProjectMeta().from_json(meta)
 
-    sly.logger.info("The cache was pulled from team files")
-    return force_stats_recalc
+    if smeta.get("chunk_size", -1) != g.CHUNK_SIZE:
+        sly.logger.warning("The chunk size has changed. Recalculating full stats...")
+        return True, _cache
+
+    chunks_dt = smeta.get("chunks_dt")
+    if chunks_dt is None:
+        sly.logger.warning(
+            "The cache has no chunks datetime to verify. Recalculating full stats..."
+        )
+        return True, _cache
+    else:
+        g.CHUNKS_LATEST_DATETIME = datetime.fromisoformat(chunks_dt[:-1])
+
+    sly.logger.info(f"The cache file {filename!r} was pulled from team files")
+    _cache["images"] = images
+    _cache["meta"] = meta
+    _cache["stats_meta"] = smeta
+    return False, _cache
 
 
 def get_iso_timestamp():
@@ -102,68 +106,41 @@ def get_iso_timestamp():
     return str(dt.isoformat()) + "Z"
 
 
-def push_cache(team_id: int, project_id: int, tf_cache_dir: str):
-    local_cache_dir = f"{g.STORAGE_DIR}/_cache"
-    os.makedirs(local_cache_dir, exist_ok=True)
+def push_cache(
+    team_id: int, project_id: int, tf_project_dir: str, project_fs_dir: str, _cache: dict
+) -> dict:
+    filename = f"{project_id}_cache.json"
+    tf_cache_path = f"{tf_project_dir}/_cache/{filename}"
 
-    ts = get_iso_timestamp()
+    local_cache_dir = f"{project_fs_dir}/_cache"
+    local_cache_path = f"{local_cache_dir}/{filename}"
+
+    ts_utc = get_iso_timestamp()
     chunks_dt = str(g.CHUNKS_LATEST_DATETIME.isoformat()) + "Z"
 
-    stats_meta = {}
-    spath = f"{local_cache_dir}/project_statistics_meta.json"
-    if os.path.exists(spath):
-        with open(spath, "r", encoding="utf-8") as f:
-            stats_meta = json.load(f)
-
-        smeta = stats_meta.get(str(project_id))
-        if smeta is not None:
-            smeta["updated_at"] = ts
-            smeta["chunk_size"] = g.CHUNK_SIZE
-            smeta["chunks_dt"] = chunks_dt
-            stats_meta[str(project_id)] = smeta
-        else:
-            stats_meta[str(project_id)] = {
-                "updated_at": ts,
-                "created_at": ts,
-                "chunk_size": g.CHUNK_SIZE,
-                "chunks_dt": chunks_dt,
-            }
-
-        with open(spath, "w", encoding="utf-8") as f:
-            json.dump(stats_meta, f)
-    else:
-        stats_meta = {
-            str(project_id): {
-                "updated_at": ts,
-                "created_at": ts,
-                "chunk_size": g.CHUNK_SIZE,
-                "chunks_dt": chunks_dt,
-            }
+    smeta = _cache.get("stats_meta")
+    if smeta is None:
+        _cache["stats_meta"] = {
+            "updated_at": ts_utc,
+            "created_at": ts_utc,
+            "chunk_size": g.CHUNK_SIZE,
+            "chunks_dt": chunks_dt,
         }
-        with open(spath, "w", encoding="utf-8") as f:
-            json.dump(stats_meta, f)
+    else:
+        _cache["stats_meta"]["updated_at"] = ts_utc
+        _cache["stats_meta"]["chunk_size"] = g.CHUNK_SIZE
+        _cache["stats_meta"]["chunks_dt"] = chunks_dt
 
-    jcache = {k: v.to_json() for k, v in g.META_CACHE.items()}
-    with open(f"{local_cache_dir}/meta_cache.json", "w", encoding="utf-8") as f:
-        json.dump(jcache, f)
+    os.makedirs(local_cache_dir, exist_ok=True)
+    with open(local_cache_path, "w", encoding="utf-8") as f:
+        json.dump(_cache, f)
 
-    with open(f"{local_cache_dir}/images_cache.json", "w", encoding="utf-8") as f:
-        tmp = {str(k): v for k, v in g.PROJ_IMAGES_CACHE.items()}
-        g.IMAGES_CACHE.update({str(project_id): tmp})
-        json.dump(g.IMAGES_CACHE, f)
-
-    g.api.file.upload_directory(
-        team_id,
-        local_cache_dir,
-        tf_cache_dir,
-        change_name_if_conflict=False,
-        replace_if_conflict=True,
-    )
-
-    sly.logger.info("The cache was pushed to team files")
+    g.api.file.upload(team_id, local_cache_path, tf_cache_path)
+    sly.logger.info(f"The cache file {filename!r} was pushed to team files")
+    return _cache
 
 
-def get_project_images_all(datasets: List[DatasetInfo]) -> List[ImageInfo]:
+def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
     return {d.id: g.api.image.get_list(d.id) for d in datasets}
 
 
@@ -172,25 +149,33 @@ def get_updated_images_and_classes(
     project_meta: ProjectMeta,
     datasets: List[DatasetInfo],
     force_stats_recalc: bool,
+    _cache: dict,
 ) -> Tuple[List[ImageInfo], List[str]]:
+    _images_cached = _cache.get("images", {})
+    _project_meta_cached = _cache.get("meta")
+
     updated_images, updated_classes = {d.id: [] for d in datasets}, {}
     if len(project_meta.obj_classes.items()) == 0:
         sly.logger.info("The project is fully unlabeled")
-        return {}, {}
+        return {}, {}, {}
 
     images_all_dct = get_project_images_all(datasets)
     images_all_flat = []
     for value in images_all_dct.values():
         images_all_flat.extend(value)
 
-    if force_stats_recalc is True:
-        for image in images_all_flat:
-            g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
-        g.META_CACHE[project.id] = project_meta
-        return images_all_dct, {}
+    images_updated_at = {}
+    for image in images_all_flat:
+        images_updated_at[image.id] = image.updated_at
 
-    if g.META_CACHE.get(project.id) is not None:
-        cached_classes = g.META_CACHE[project.id].obj_classes
+    _cache["images"] = images_updated_at
+    _cache["meta"] = project_meta.to_json()
+
+    if force_stats_recalc is True:
+        return images_all_dct, {}, _cache
+
+    if _project_meta_cached is not None:
+        cached_classes = _project_meta_cached.obj_classes
         if len(cached_classes) != len(project_meta.obj_classes):
             cached = {x.sly_id: x.name for x in cached_classes}
             actual = {x.sly_id: x.name for x in project_meta.obj_classes}
@@ -199,50 +184,44 @@ def get_updated_images_and_classes(
 
             updated_ids = actual_ids.symmetric_difference(cached_ids)
 
-            def func(pair):
+            def _func(pair):
                 id, name = pair
                 return True if id in updated_ids else False
 
             for dct in [cached, actual]:
-                updated_classes.update(dict(filter(func, dct.items())))
+                updated_classes.update(dict(filter(_func, dct.items())))
 
             sly.logger.info(
                 f"Changes in the number of classes detected: {list(updated_classes.values())}"
             )
 
-    g.META_CACHE[project.id] = project_meta
-
-    set_A, set_B = set(g.PROJ_IMAGES_CACHE), set([i.id for i in images_all_flat])
+    set_A, set_B = set(_images_cached), set([i.id for i in images_all_flat])
 
     for image in images_all_flat:
         try:
             image: ImageInfo
-            cached_updated_at = g.PROJ_IMAGES_CACHE[image.id]
+            cached_updated_at = _images_cached[image.id]
             if image.updated_at != cached_updated_at:
                 updated_images[image.dataset_id].append(image)
-                g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
         except KeyError:
             updated_images[image.dataset_id].append(image)
-            g.PROJ_IMAGES_CACHE[image.id] = image.updated_at
 
     if set_A != set_B:
         if set_A.issubset(set_B):
             sly.logger.warning(f"The images with the following ids were added: {set_B - set_A}")
         elif set_B.issubset(set_A):
             sly.logger.warning(f"The images with the following ids were deleted: {set_A - set_B}")
-            g.PROJ_IMAGES_CACHE = {
-                k: v for k, v in g.PROJ_IMAGES_CACHE.items() if k not in (set_A - set_B)
-            }
 
         sly.logger.info("Recalculate full statistics")
-        return images_all_dct, {}
+        return images_all_dct, {}, _cache
 
     num_updated = sum(len(lst) for lst in updated_images.values())
     if num_updated == project.items_count:
         sly.logger.info(f"Full dataset statistics will be calculated.")
     elif num_updated > 0:
         sly.logger.info(f"The changes in {num_updated} images detected")
-    return updated_images, updated_classes
+
+    return updated_images, updated_classes, _cache
 
 
 def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, dict]:
