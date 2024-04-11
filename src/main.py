@@ -115,12 +115,9 @@ def main_func(team: TeamInfo, project: ProjectInfo):
 
     sly.logger.info("Start Quality Assurance.")
 
-    # tf_cache_dir = f"{g.TF_STATS_DIR}/_cache"
     tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
-    # tf_cache_dir = f"{tf_project_dir}/{}"
     project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
 
-    # g.initialize_global_cache()
     force_stats_recalc, _cache = u.pull_cache(team.id, project.id, tf_project_dir, project_fs_dir)
 
     json_project_meta = g.api.project.get_meta(project.id)
