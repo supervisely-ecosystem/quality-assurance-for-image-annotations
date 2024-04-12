@@ -23,3 +23,5 @@ TF_ACTIVE_REQUESTS_DIR = f"{TF_STATS_DIR}/_active_requests"
 
 
 CHUNK_SIZE = 1000
+
+TMP_IMAGES_ALL = None

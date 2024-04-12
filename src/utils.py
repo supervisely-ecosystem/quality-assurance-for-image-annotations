@@ -475,6 +475,88 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             # sly.logger.info(f"json_saved: {tm.get_sec()}")
 
 
+def sample_images(
+    api: sly.Api,
+    project: Union[int, str],
+    project_stats: dict,
+    datasets: List[Union[sly.DatasetInfo, sly.Project.DatasetDict]],
+    sample_rate: float,
+):
+    total = 0
+    samples = []
+    image_stats, imageTag_stats, objectTag_stats = (
+        project_stats["images"]["datasets"],
+        project_stats["imageTags"]["datasets"],
+        project_stats["objectTags"]["datasets"],
+    )
+
+    image_stats = sorted(image_stats, key=lambda x: x["id"])
+    imageTag_stats = sorted(imageTag_stats, key=lambda x: x["id"])
+    objectTag_stats = sorted(objectTag_stats, key=lambda x: x["id"])
+
+    for dataset, image_stat, imageTag_stat, objectTag_stat in zip(
+        datasets, image_stats, imageTag_stats, objectTag_stats
+    ):
+        is_unlabeled = (
+            image_stat["imagesMarked"] == 0
+            and imageTag_stat["imagesTagged"] == 0
+            and objectTag_stat["objectsTagged"] == 0
+        )
+    for dataset, image_stat, imageTag_stat, objectTag_stat in zip(
+        datasets, image_stats, imageTag_stats, objectTag_stats
+    ):
+        is_unlabeled = (
+            image_stat["imagesMarked"] == 0
+            and imageTag_stat["imagesTagged"] == 0
+            and objectTag_stat["objectsTagged"] == 0
+        )
+        if dataset.items_count == 0 or is_unlabeled:
+            continue
+        k = int(
+            max(
+                1,
+                sample_rate
+                * (
+                    dataset.items_count
+                    if isinstance(project, int)
+                    else len(os.listdir(dataset.ann_dir))
+                ),
+            )
+        )
+
+        ds_images = (
+            api.image.get_list(dataset.id)
+            if isinstance(project, int)
+            else [
+                dataset.get_image_info(sly.fs.get_file_name(img))
+                for img in os.listdir(dataset.ann_dir)
+            ]
+        )
+
+        s = random.sample(ds_images, k)
+        samples.append((dataset, s))
+        total += k
+    return samples, total
+
+
+def calculate_and_save_heatmaps(heatmaps):
+
+    samples, total = sample_images(api, project, project_stats, datasets, sample_rate)
+    with tqdm(desc="Calculating heatmaps from sample", total=total) as pbar:
+        for dataset, images in samples:
+            for batch in sly.batched(images, 100):
+                image_ids = [image.id for image in batch]
+                image_names = [image.name for image in batch]
+
+                janns = g.api.annotation.download_json_batch(dataset.id, [id for id in image_ids])
+                anns = [sly.Annotation.from_json(ann_json, project_meta) for ann_json in janns]
+
+                for img, ann in zip(batch, anns):
+                    for stat in stats:
+                        stat.update(img, ann)
+                    pbar.update(1)
+
+
 @sly.timeit
 def archive_chunks_and_upload(
     team_id,
@@ -511,20 +593,22 @@ def archive_chunks_and_upload(
 @sly.timeit
 def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
     remove_files_with_null(curr_projectfs_dir)
-    json_paths = list_files(curr_projectfs_dir, valid_extensions=[".json"])
+    stats_paths = list_files(curr_projectfs_dir, valid_extensions=[".json", ".png"])
     dst_json_paths = [
-        f"{curr_tf_project_dir}/{get_file_name_with_ext(path)}" for path in json_paths
+        f"{curr_tf_project_dir}/{get_file_name_with_ext(path)}" for path in stats_paths
     ]
 
     with tqdm(
-        desc="Uploading .json stats",
-        total=sum([get_file_size(path) for path in json_paths]),
+        desc="Uploading .json and .png stats",
+        total=sum([get_file_size(path) for path in stats_paths]),
         unit="B",
         unit_scale=True,
     ) as pbar:
-        g.api.file.upload_bulk(team_id, json_paths, dst_json_paths, pbar)
+        g.api.file.upload_bulk(team_id, stats_paths, dst_json_paths, pbar)
 
-    sly.logger.info(f"{len(json_paths)} updated .json stats succesfully updated and uploaded")
+    sly.logger.info(
+        f"{len(stats_paths)} updated .json and .png stats succesfully updated and uploaded"
+    )
 
 
 def remove_files_with_null(directory_path: str):

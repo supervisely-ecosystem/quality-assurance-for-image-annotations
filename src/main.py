@@ -142,6 +142,8 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         dtools.ClassesTreemap(project_meta),
     ]
 
+    heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
+
     if sly.fs.dir_exists(project_fs_dir):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
@@ -185,10 +187,11 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     )
     sly.logger.info("Stats calculation finished.")
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
-
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
-    # u.archive_chunks_and_upload(team.id, project, stats, tf_project_dir, project_fs_dir)
-    sly.logger.debug("Start threading")
+
+    u.calculate_and_save_heatmaps(heatmaps)
+
+    sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
     thread = threading.Thread(
         target=u.archive_chunks_and_upload,
         args=(team.id, project, stats, tf_project_dir, project_fs_dir),
