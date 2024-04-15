@@ -2,7 +2,7 @@ import json, time
 import tarfile
 import os
 import math
-from typing import List, Literal, Optional, Dict, Tuple, Union
+from typing import List, Literal, Optional, Dict, Tuple, Union, Set
 import dataset_tools as dtools
 from dataset_tools.image.stats.basestats import BaseStats
 from datetime import datetime
@@ -15,7 +15,7 @@ import src.globals as g
 import numpy as np
 import ujson
 from collections import defaultdict
-
+import random
 from supervisely.io.fs import (
     get_file_name_with_ext,
     get_file_name,
@@ -156,8 +156,6 @@ def get_updated_images_and_classes(
     images_all_flat = []
     for value in images_all_dct.values():
         images_all_flat.extend(value)
-
-    g.TMP_IMAGES_ALL = images_all_dct
 
     images_updated_at = {}
     for image in images_all_flat:
@@ -379,14 +377,16 @@ def download_stats_chunks_to_buffer(
 
 
 @sly.timeit
-def calculate_and_save_stats(
+def calculate_stats_and_save_chunks(
     updated_images,
     stats,
     tf_all_paths,
     project_fs_dir,
     chunk_to_images,
     image_to_chunk,
-):
+) -> Dict[int, Set[ImageInfo]]:
+    heatmaps_figure_ids = defaultdict(list)
+    heatmaps_image_ids = defaultdict(set)
     total_updated = sum(len(lst) for lst in updated_images.values())
     sly.logger.info(f"Start calculating stats for {total_updated} images.")
     with tqdm(desc="Calculating stats", total=total_updated) as pbar:
@@ -404,7 +404,7 @@ def calculate_and_save_stats(
                         figs = figures.get(image.id, [])
                         for stat in stats:
                             stat.update2(image, figs)
-                        _update_heatmaps_sample(image, figs)
+                        _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs)
 
                     pbar.update(len(batch_infos))
 
@@ -417,6 +417,8 @@ def calculate_and_save_stats(
 
         if pbar.last_print_n < pbar.total:  # unlabeled images
             pbar.update(pbar.total - pbar.n)
+
+    return heatmaps_image_ids
 
 
 # @sly.timeit
@@ -480,27 +482,42 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             # sly.logger.info(f"json_saved: {tm.get_sec()}")
 
 
-def _update_heatmaps_sample(image: ImageInfo, figs: List[FigureInfo]):
+def _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs: List[FigureInfo]):
     for fig in figs:
-        if len(g.TMP_HTMP_FIGS.get(fig.class_id, [])) < 50:
-            g.TMP_HTMP_FIGS[fig.class_id].append(fig.id)
-            g.TMP_HTMP_IMAGES[fig.dataset_id].add(fig.entity_id)
+        if len(heatmaps_figure_ids.get(fig.class_id, [])) < 50:
+            heatmaps_figure_ids[fig.class_id].append(fig.id)
+            heatmaps_image_ids[fig.dataset_id].add(fig.entity_id)
 
 
 def calculate_and_save_heatmaps(
-    project_fs_dir, project_meta, datasets, heatmaps: dtools.ClassesHeatmaps
+    datasets: List[DatasetInfo],
+    project_fs_dir: str,
+    heatmaps: dtools.ClassesHeatmaps,
+    heatmaps_image_ids: Dict[int, Set[int]],
+    force_heatmaps_recalc: bool = False,
 ):
-    sample_total = sum(len(lst) for lst in g.TMP_HTMP_IMAGES.values())
+    if force_heatmaps_recalc is True:
+        heatmaps_image_ids = defaultdict(set)
+        for dataset in datasets:
+            data = g.api.image.get_list(dataset.id)
+            share = 0.2 if len(data) > 1000 else 1
+            sample_size = int(len(data) * share)
+            sampled_data = random.sample(data, sample_size)
+            for image in sampled_data:
+                heatmaps_image_ids[image.dataset_id].add(image.id)
+
+    sample_total = sum(len(lst) for lst in heatmaps_image_ids.values())
     with tqdm(desc="Calculating heatmaps from sample", total=sample_total) as pbar:
 
-        for dataset_id, image_ids in g.TMP_HTMP_IMAGES.items():
+        for dataset_id, image_ids in heatmaps_image_ids.items():
             image_infos = g.api.image.get_info_by_id_batch(list(image_ids))
 
             for batch_infos in sly.batched(image_infos, 100):
                 batch_ids = [x.id for x in batch_infos]
                 figures = g.api.image.figure.download(dataset_id, batch_ids)
+
                 for image in batch_infos:
-                    heatmaps.from_figures(image, figures.get(image.id, []))
+                    heatmaps.update2(image, figures.get(image.id, []))
                     pbar.update(1)
     heatmaps.to_image(f"{project_fs_dir}/{heatmaps.basename_stem}.png")
 

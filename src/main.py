@@ -66,9 +66,10 @@ def stats_endpoint(project_id: int, user_id: int = None):
         sly.logger.error(msg, extra=xtr)
 
         active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
-        active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project.id}"
+        active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
         sly.fs.silent_remove(active_project_path)
-        g.api.file.remove(team.id, active_project_path_tf)
+        if team is not None:
+            g.api.file.remove(team.id, active_project_path_tf)
 
         raise HTTPException(
             status_code=500,
@@ -91,8 +92,6 @@ def _remove_old_active_project_request(now, team, file):
 
 
 def main_func(team: TeamInfo, project: ProjectInfo):
-
-    g.TMP_HTMP_FIGS = defaultdict(list)
 
     sly.logger.debug("Checking requests...")
 
@@ -182,7 +181,7 @@ def main_func(team: TeamInfo, project: ProjectInfo):
 
     tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]
 
-    u.calculate_and_save_stats(
+    heatmaps_image_ids = u.calculate_stats_and_save_chunks(
         updated_images,
         stats,
         tf_all_paths,
@@ -194,7 +193,12 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
-    u.calculate_and_save_heatmaps(project_fs_dir, project_meta, datasets, heatmaps)
+    force_htmap_recalc = False
+    if force_stats_recalc is True or len(updated_images) > 0 or len(updated_classes) > 0:
+        force_htmap_recalc = True
+    u.calculate_and_save_heatmaps(
+        datasets, project_fs_dir, heatmaps, heatmaps_image_ids, force_htmap_recalc
+    )
 
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
     thread = threading.Thread(
