@@ -7,7 +7,7 @@ import dataset_tools as dtools
 from dataset_tools.image.stats.basestats import BaseStats
 from datetime import datetime
 import humanize
-from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo
+from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo, FigureInfo
 from itertools import groupby
 from tqdm import tqdm
 import supervisely as sly
@@ -156,6 +156,8 @@ def get_updated_images_and_classes(
     images_all_flat = []
     for value in images_all_dct.values():
         images_all_flat.extend(value)
+
+    g.TMP_IMAGES_ALL = images_all_dct
 
     images_updated_at = {}
     for image in images_all_flat:
@@ -399,8 +401,11 @@ def calculate_and_save_stats(
                     batch_ids = [x.id for x in batch_infos]
                     figures = g.api.image.figure.download(dataset_id, batch_ids, skip_geometry=True)
                     for image in batch_infos:
+                        figs = figures.get(image.id, [])
                         for stat in stats:
-                            stat.update2(image, figures.get(image.id, []))
+                            stat.update2(image, figs)
+                        _update_heatmaps_sample(image, figs)
+
                     pbar.update(len(batch_infos))
 
                 latest_datetime = get_latest_datetime(images_chunk)
@@ -475,86 +480,29 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             # sly.logger.info(f"json_saved: {tm.get_sec()}")
 
 
-def sample_images(
-    api: sly.Api,
-    project: Union[int, str],
-    project_stats: dict,
-    datasets: List[Union[sly.DatasetInfo, sly.Project.DatasetDict]],
-    sample_rate: float,
+def _update_heatmaps_sample(image: ImageInfo, figs: List[FigureInfo]):
+    for fig in figs:
+        if len(g.TMP_HTMP_FIGS.get(fig.class_id, [])) < 50:
+            g.TMP_HTMP_FIGS[fig.class_id].append(fig.id)
+            g.TMP_HTMP_IMAGES[fig.dataset_id].add(fig.entity_id)
+
+
+def calculate_and_save_heatmaps(
+    project_fs_dir, project_meta, datasets, heatmaps: dtools.ClassesHeatmaps
 ):
-    total = 0
-    samples = []
-    image_stats, imageTag_stats, objectTag_stats = (
-        project_stats["images"]["datasets"],
-        project_stats["imageTags"]["datasets"],
-        project_stats["objectTags"]["datasets"],
-    )
+    sample_total = sum(len(lst) for lst in g.TMP_HTMP_IMAGES.values())
+    with tqdm(desc="Calculating heatmaps from sample", total=sample_total) as pbar:
 
-    image_stats = sorted(image_stats, key=lambda x: x["id"])
-    imageTag_stats = sorted(imageTag_stats, key=lambda x: x["id"])
-    objectTag_stats = sorted(objectTag_stats, key=lambda x: x["id"])
+        for dataset_id, image_ids in g.TMP_HTMP_IMAGES.items():
+            image_infos = g.api.image.get_info_by_id_batch(list(image_ids))
 
-    for dataset, image_stat, imageTag_stat, objectTag_stat in zip(
-        datasets, image_stats, imageTag_stats, objectTag_stats
-    ):
-        is_unlabeled = (
-            image_stat["imagesMarked"] == 0
-            and imageTag_stat["imagesTagged"] == 0
-            and objectTag_stat["objectsTagged"] == 0
-        )
-    for dataset, image_stat, imageTag_stat, objectTag_stat in zip(
-        datasets, image_stats, imageTag_stats, objectTag_stats
-    ):
-        is_unlabeled = (
-            image_stat["imagesMarked"] == 0
-            and imageTag_stat["imagesTagged"] == 0
-            and objectTag_stat["objectsTagged"] == 0
-        )
-        if dataset.items_count == 0 or is_unlabeled:
-            continue
-        k = int(
-            max(
-                1,
-                sample_rate
-                * (
-                    dataset.items_count
-                    if isinstance(project, int)
-                    else len(os.listdir(dataset.ann_dir))
-                ),
-            )
-        )
-
-        ds_images = (
-            api.image.get_list(dataset.id)
-            if isinstance(project, int)
-            else [
-                dataset.get_image_info(sly.fs.get_file_name(img))
-                for img in os.listdir(dataset.ann_dir)
-            ]
-        )
-
-        s = random.sample(ds_images, k)
-        samples.append((dataset, s))
-        total += k
-    return samples, total
-
-
-def calculate_and_save_heatmaps(heatmaps):
-
-    samples, total = sample_images(api, project, project_stats, datasets, sample_rate)
-    with tqdm(desc="Calculating heatmaps from sample", total=total) as pbar:
-        for dataset, images in samples:
-            for batch in sly.batched(images, 100):
-                image_ids = [image.id for image in batch]
-                image_names = [image.name for image in batch]
-
-                janns = g.api.annotation.download_json_batch(dataset.id, [id for id in image_ids])
-                anns = [sly.Annotation.from_json(ann_json, project_meta) for ann_json in janns]
-
-                for img, ann in zip(batch, anns):
-                    for stat in stats:
-                        stat.update(img, ann)
+            for batch_infos in sly.batched(image_infos, 100):
+                batch_ids = [x.id for x in batch_infos]
+                figures = g.api.image.figure.download(dataset_id, batch_ids)
+                for image in batch_infos:
+                    heatmaps.from_figures(image, figures.get(image.id, []))
                     pbar.update(1)
+    heatmaps.to_image(f"{project_fs_dir}/{heatmaps.basename_stem}.png")
 
 
 @sly.timeit

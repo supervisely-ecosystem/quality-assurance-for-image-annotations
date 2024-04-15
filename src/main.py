@@ -1,4 +1,5 @@
 import os
+from collections import defaultdict
 import src.globals as g
 import src.utils as u
 import supervisely as sly
@@ -65,7 +66,9 @@ def stats_endpoint(project_id: int, user_id: int = None):
         sly.logger.error(msg, extra=xtr)
 
         active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
+        active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project.id}"
         sly.fs.silent_remove(active_project_path)
+        g.api.file.remove(team.id, active_project_path_tf)
 
         raise HTTPException(
             status_code=500,
@@ -88,6 +91,8 @@ def _remove_old_active_project_request(now, team, file):
 
 
 def main_func(team: TeamInfo, project: ProjectInfo):
+
+    g.TMP_HTMP_FIGS = defaultdict(list)
 
     sly.logger.debug("Checking requests...")
 
@@ -189,7 +194,7 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
-    u.calculate_and_save_heatmaps(heatmaps)
+    u.calculate_and_save_heatmaps(project_fs_dir, project_meta, datasets, heatmaps)
 
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
     thread = threading.Thread(

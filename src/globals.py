@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 
 import supervisely as sly
+from collections import defaultdict
 
 if sly.is_development():
     load_dotenv("local.env")
@@ -25,3 +26,5 @@ TF_ACTIVE_REQUESTS_DIR = f"{TF_STATS_DIR}/_active_requests"
 CHUNK_SIZE = 1000
 
 TMP_IMAGES_ALL = None
+TMP_HTMP_FIGS = defaultdict(list)
+TMP_HTMP_IMAGES = defaultdict(set)
