@@ -463,8 +463,8 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             updated_classes=updated_classes,
         )
         # sly.logger.info(f"chunks_sewed: {tm.get_sec()}")
-        # if sly.is_development():
-        #     stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
+        if sly.is_development():
+            stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
 
         # tm = sly.TinyTimer()
         res = stat.to_json2()
