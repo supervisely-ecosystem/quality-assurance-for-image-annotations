@@ -4,6 +4,6 @@
 # git+https://github.com/supervisely/dataset-tools.git@quality-app
 # dataset-tools
 # git+https://github.com/supervisely/dataset-tools.git@main
-dataset-tools==0.0.52
+dataset-tools==0.0.53
 humanize
 ujson
