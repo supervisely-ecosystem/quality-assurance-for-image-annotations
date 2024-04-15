@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 
 import supervisely as sly
+from collections import defaultdict
 
 if sly.is_development():
     load_dotenv("local.env")

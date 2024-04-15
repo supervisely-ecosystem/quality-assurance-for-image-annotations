@@ -2,12 +2,12 @@ import json, time
 import tarfile
 import os
 import math
-from typing import List, Literal, Optional, Dict, Tuple, Union
+from typing import List, Literal, Optional, Dict, Tuple, Union, Set
 import dataset_tools as dtools
 from dataset_tools.image.stats.basestats import BaseStats
 from datetime import datetime
 import humanize
-from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo
+from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo, FigureInfo
 from itertools import groupby
 from tqdm import tqdm
 import supervisely as sly
@@ -15,7 +15,7 @@ import src.globals as g
 import numpy as np
 import ujson
 from collections import defaultdict
-
+import random
 from supervisely.io.fs import (
     get_file_name_with_ext,
     get_file_name,
@@ -377,14 +377,16 @@ def download_stats_chunks_to_buffer(
 
 
 @sly.timeit
-def calculate_and_save_stats(
+def calculate_stats_and_save_chunks(
     updated_images,
     stats,
     tf_all_paths,
     project_fs_dir,
     chunk_to_images,
     image_to_chunk,
-):
+) -> Dict[int, Set[ImageInfo]]:
+    heatmaps_figure_ids = defaultdict(list)
+    heatmaps_image_ids = defaultdict(set)
     total_updated = sum(len(lst) for lst in updated_images.values())
     sly.logger.info(f"Start calculating stats for {total_updated} images.")
     with tqdm(desc="Calculating stats", total=total_updated) as pbar:
@@ -399,8 +401,11 @@ def calculate_and_save_stats(
                     batch_ids = [x.id for x in batch_infos]
                     figures = g.api.image.figure.download(dataset_id, batch_ids, skip_geometry=True)
                     for image in batch_infos:
+                        figs = figures.get(image.id, [])
                         for stat in stats:
-                            stat.update2(image, figures.get(image.id, []))
+                            stat.update2(image, figs)
+                        _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs)
+
                     pbar.update(len(batch_infos))
 
                 latest_datetime = get_latest_datetime(images_chunk)
@@ -412,6 +417,8 @@ def calculate_and_save_stats(
 
         if pbar.last_print_n < pbar.total:  # unlabeled images
             pbar.update(pbar.total - pbar.n)
+
+    return heatmaps_image_ids
 
 
 # @sly.timeit
@@ -475,6 +482,46 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             # sly.logger.info(f"json_saved: {tm.get_sec()}")
 
 
+def _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs: List[FigureInfo]):
+    for fig in figs:
+        if len(heatmaps_figure_ids.get(fig.class_id, [])) < 50:
+            heatmaps_figure_ids[fig.class_id].append(fig.id)
+            heatmaps_image_ids[fig.dataset_id].add(fig.entity_id)
+
+
+def calculate_and_save_heatmaps(
+    datasets: List[DatasetInfo],
+    project_fs_dir: str,
+    heatmaps: dtools.ClassesHeatmaps,
+    heatmaps_image_ids: Dict[int, Set[int]],
+    force_heatmaps_recalc: bool = False,
+):
+    if force_heatmaps_recalc is True:
+        heatmaps_image_ids = defaultdict(set)
+        for dataset in datasets:
+            data = g.api.image.get_list(dataset.id)
+            share = 0.2 if len(data) > 1000 else 1
+            sample_size = int(len(data) * share)
+            sampled_data = random.sample(data, sample_size)
+            for image in sampled_data:
+                heatmaps_image_ids[image.dataset_id].add(image.id)
+
+    sample_total = sum(len(lst) for lst in heatmaps_image_ids.values())
+    with tqdm(desc="Calculating heatmaps from sample", total=sample_total) as pbar:
+
+        for dataset_id, image_ids in heatmaps_image_ids.items():
+            image_infos = g.api.image.get_info_by_id_batch(list(image_ids))
+
+            for batch_infos in sly.batched(image_infos, 100):
+                batch_ids = [x.id for x in batch_infos]
+                figures = g.api.image.figure.download(dataset_id, batch_ids)
+
+                for image in batch_infos:
+                    heatmaps.update2(image, figures.get(image.id, []))
+                    pbar.update(1)
+    heatmaps.to_image(f"{project_fs_dir}/{heatmaps.basename_stem}.png")
+
+
 @sly.timeit
 def archive_chunks_and_upload(
     team_id,
@@ -511,20 +558,22 @@ def archive_chunks_and_upload(
 @sly.timeit
 def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
     remove_files_with_null(curr_projectfs_dir)
-    json_paths = list_files(curr_projectfs_dir, valid_extensions=[".json"])
+    stats_paths = list_files(curr_projectfs_dir, valid_extensions=[".json", ".png"])
     dst_json_paths = [
-        f"{curr_tf_project_dir}/{get_file_name_with_ext(path)}" for path in json_paths
+        f"{curr_tf_project_dir}/{get_file_name_with_ext(path)}" for path in stats_paths
     ]
 
     with tqdm(
-        desc="Uploading .json stats",
-        total=sum([get_file_size(path) for path in json_paths]),
+        desc="Uploading .json and .png stats",
+        total=sum([get_file_size(path) for path in stats_paths]),
         unit="B",
         unit_scale=True,
     ) as pbar:
-        g.api.file.upload_bulk(team_id, json_paths, dst_json_paths, pbar)
+        g.api.file.upload_bulk(team_id, stats_paths, dst_json_paths, pbar)
 
-    sly.logger.info(f"{len(json_paths)} updated .json stats succesfully updated and uploaded")
+    sly.logger.info(
+        f"{len(stats_paths)} updated .json and .png stats succesfully updated and uploaded"
+    )
 
 
 def remove_files_with_null(directory_path: str):
