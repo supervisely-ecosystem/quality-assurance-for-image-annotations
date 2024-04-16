@@ -517,7 +517,7 @@ def calculate_and_save_heatmaps(
                 figures = g.api.image.figure.download(dataset_id, batch_ids)
 
                 for image in batch_infos:
-                    heatmaps.update2(image, figures.get(image.id, []))
+                    heatmaps.update2(image, figures.get(image.id, []), skip_broken_geometry=True)
                     pbar.update(1)
     heatmaps.to_image(f"{project_fs_dir}/{heatmaps.basename_stem}.png")
 
