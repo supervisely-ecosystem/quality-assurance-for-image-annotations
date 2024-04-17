@@ -496,6 +496,8 @@ def calculate_and_save_heatmaps(
     heatmaps_image_ids: Dict[int, Set[int]],
     force_heatmaps_recalc: bool = False,
 ):
+    if len(heatmaps_image_ids) == 0:
+        return
     if force_heatmaps_recalc is True:
         heatmaps_image_ids = defaultdict(set)
         for dataset in datasets:
