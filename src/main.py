@@ -159,6 +159,9 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
+    if f"{project_fs_dir}/{heatmaps.basename_stem}.png":
+        force_stats_recalc = True
+
     updated_images, updated_classes, _cache = u.get_updated_images_and_classes(
         project, project_meta, datasets, force_stats_recalc, _cache
     )
