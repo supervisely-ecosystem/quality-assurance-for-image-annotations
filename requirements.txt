@@ -7,3 +7,4 @@
 dataset-tools==0.0.55
 humanize
 ujson
+scikit-image==0.21.0
