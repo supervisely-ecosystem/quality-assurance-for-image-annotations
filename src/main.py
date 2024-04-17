@@ -38,13 +38,18 @@ def test_ping():
 TIMELOCK_LIMIT = 100  # seconds
 
 
-def _get_extra(user_id, team, project) -> dict:
-    if project is None or team is None:
+def _get_extra(user_id, team, workspace, project) -> dict:
+    if project is None or team is None or workspace is None:
         if user_id is not None:
             return {"USER_ID": user_id}
     else:
         if user_id is not None:
-            return {"USER_ID": user_id, "TEAM_ID": team.id, "PROJECT_ID": project.id}
+            return {
+                "USER_ID": user_id,
+                "TEAM_ID": team.id,
+                "WORKSPACE_ID": workspace.id,
+                "PROJECT_ID": project.id,
+            }
     return None
 
 
@@ -53,16 +58,18 @@ def stats_endpoint(project_id: int, user_id: int = None):
 
     project = None
     team = None
+    workspace = None
 
     try:
         project = g.api.project.get_info_by_id(project_id, raise_error=True)
         team = g.api.team.get_info_by_id(project.team_id, raise_error=True)
+        workspace = g.api.workspace.get_info_by_id(project.workspace_id, raise_error=True)
 
         result = main_func(team, project)
 
     except Exception as e:
         msg = e.__class__.__name__ + ": " + str(e)
-        xtr = _get_extra(user_id, team, project)
+        xtr = _get_extra(user_id, team, workspace, project)
         sly.logger.error(msg, extra=xtr)
 
         active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
