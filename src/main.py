@@ -156,7 +156,9 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
-    if f"{project_fs_dir}/{heatmaps.basename_stem}.png":
+    heatmaps_tf_path = f"{tf_project_dir}/{heatmaps.basename_stem}.png"
+    if not g.api.file.exists(team.id, heatmaps_tf_path):
+        sly.logger.info(f"File {heatmaps_tf_path!r} not exists. Forcing stats recalculation.")
         force_stats_recalc = True
 
     updated_images, updated_classes, _cache = u.get_updated_images_and_classes(
