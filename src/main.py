@@ -146,7 +146,8 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         # dtools.ClassSizes(project_meta),
         # dtools.ClassesTreemap(project_meta),
         dtools.ClassToTagCooccurrence(project_meta),
-        dtools.CooccurrenceImageTags(project_meta),
+        dtools.TagsCooccurrence(project_meta),
+        dtools.OneOfTagsDistribution(project_meta),
     ]
 
     heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
