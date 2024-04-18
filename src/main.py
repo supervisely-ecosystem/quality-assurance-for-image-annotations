@@ -145,7 +145,7 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         dtools.ObjectSizes(project_meta, project_stats),
         dtools.ClassSizes(project_meta),
         dtools.ClassesTreemap(project_meta),
-        dtools.TagsCooccurrence(project_meta),
+        # dtools.TagsCooccurrence(project_meta),
         dtools.ClassToTagCooccurrence(project_meta),
         # dtools.OneOfTagsDistribution(project_meta),
     ]
