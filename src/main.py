@@ -29,12 +29,6 @@ app = sly.Application(layout=layout, static_dir=static_dir)
 server = app.get_server()
 
 
-@server.get("/ping")
-def test_ping():
-    """test asynchronous behaviour"""
-    return JSONResponse("ping")
-
-
 TIMELOCK_LIMIT = 100  # seconds
 
 
@@ -144,7 +138,8 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         # dtools.ObjectSizes(project_meta, project_stats),
         # dtools.ClassSizes(project_meta),
         # dtools.ClassesTreemap(project_meta),
-        dtools.ClassToTagCooccurrence(project_meta)
+        dtools.ClassToTagCooccurrence(project_meta),
+        dtools.CooccurrenceImageTags(project_meta),
     ]
 
     heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
