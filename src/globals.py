@@ -24,3 +24,4 @@ TF_ACTIVE_REQUESTS_DIR = f"{TF_STATS_DIR}/_active_requests"
 
 
 CHUNK_SIZE = 1000
+DTOOLS_VERSION = "0.0.5XX"  # todo force stats refresh if DTOOLS_VERSION too old
