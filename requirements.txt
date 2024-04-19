@@ -1,10 +1,4 @@
-# supervisely==6.73.34
-# supervisely
-# git+https://github.com/supervisely/supervisely.git@wrap-figures-list
-# git+https://github.com/supervisely/dataset-tools.git@quality-app
-# dataset-tools
-# git+https://github.com/supervisely/dataset-tools.git@main
-dataset-tools==0.0.62
+dataset-tools==0.0.63
 humanize
 ujson
 scikit-image==0.21.0
