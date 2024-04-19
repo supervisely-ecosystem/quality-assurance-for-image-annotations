@@ -203,9 +203,9 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     force_htmap_recalc = False
     if force_stats_recalc is True or len(updated_images) > 0 or len(updated_classes) > 0:
         force_htmap_recalc = True
-    u.calculate_and_save_heatmaps(
-        datasets, project_fs_dir, heatmaps, heatmaps_image_ids, force_htmap_recalc
-    )
+    # u.calculate_and_save_heatmaps(
+    #     datasets, project_fs_dir, heatmaps, heatmaps_image_ids, force_htmap_recalc
+    # )
 
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
     thread = threading.Thread(
