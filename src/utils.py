@@ -1,4 +1,5 @@
 import json, time
+from packaging.version import Version
 import tarfile
 import os
 import math
@@ -80,6 +81,19 @@ def pull_cache(
     else:
         g.CHUNKS_LATEST_DATETIME = datetime.fromisoformat(chunks_dt[:-1])
 
+    dtools_version = smeta.get("dataset-tools")
+    if dtools_version is None:
+        sly.logger.warning(
+            "The cache has no 'dataset-tools' version to verify. Recalculating full stats..."
+        )
+        return True, _cache
+    else:
+        if Version(dtools_version) < Version(g.MINIMUM_DTOOLS_VERSION):
+            sly.logger.warning(
+                f"The cached version ({dtools_version}) of 'dataset-tools' package is less than the required one ({g.MINIMUM_DTOOLS_VERSION}). Force statistics recalculation."
+            )
+            return True, _cache
+
     sly.logger.info(f"The cache file {filename!r} was pulled from team files")
 
     _cache["stats_meta"] = smeta
@@ -107,6 +121,11 @@ def push_cache(
     ts_utc = get_iso_timestamp()
     chunks_dt = str(g.CHUNKS_LATEST_DATETIME.isoformat()) + "Z"
 
+    try:
+        actual_version = dtools.__version__
+    except:
+        actual_version = None
+
     smeta = _cache.get("stats_meta")
     if smeta is None:
         _cache["stats_meta"] = {
@@ -114,11 +133,13 @@ def push_cache(
             "created_at": ts_utc,
             "chunk_size": g.CHUNK_SIZE,
             "chunks_dt": chunks_dt,
+            "dataset-tools": actual_version,
         }
     else:
         _cache["stats_meta"]["updated_at"] = ts_utc
         _cache["stats_meta"]["chunk_size"] = g.CHUNK_SIZE
         _cache["stats_meta"]["chunks_dt"] = chunks_dt
+        _cache["stats_meta"]["dataset-tools"] = actual_version
 
     os.makedirs(local_cache_dir, exist_ok=True)
     with open(local_cache_path, "w", encoding="utf-8") as f:
@@ -488,7 +509,7 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
 
 def _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs: List[FigureInfo]):
     for fig in figs:
-        if len(heatmaps_figure_ids.get(fig.class_id, [])) < 50:
+        if len(heatmaps_figure_ids.get(fig.class_id, [])) < 30:
             heatmaps_figure_ids[fig.class_id].append(fig.id)
             heatmaps_image_ids[fig.dataset_id].add(fig.entity_id)
 

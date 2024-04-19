@@ -1,4 +1,6 @@
 import os
+
+
 from collections import defaultdict
 import src.globals as g
 import src.utils as u
@@ -123,6 +125,7 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
     project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
 
+    force_stats_recalc = False
     force_stats_recalc, _cache = u.pull_cache(team.id, project.id, tf_project_dir, project_fs_dir)
 
     json_project_meta = g.api.project.get_meta(project.id)
@@ -145,7 +148,7 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         dtools.ObjectSizes(project_meta, project_stats),
         dtools.ClassSizes(project_meta),
         dtools.ClassesTreemap(project_meta),
-        # dtools.TagsCooccurrence(project_meta),
+        dtools.TagsCooccurrence(project_meta),
         dtools.ClassToTagCooccurrence(project_meta),
         # dtools.OneOfTagsDistribution(project_meta),
     ]
@@ -155,16 +158,6 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     if sly.fs.dir_exists(project_fs_dir):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
-
-    heatmaps_tf_path = f"{tf_project_dir}/{heatmaps.basename_stem}.png"
-    if not g.api.file.exists(team.id, heatmaps_tf_path):
-        sly.logger.info(f"File {heatmaps_tf_path!r} not exists. Forcing stats recalculation.")
-        force_stats_recalc = True
-    tmp = dtools.ClassToTagCooccurrence(project_meta).basename_stem
-    cls2tag_tf_path = f"{tf_project_dir}/{tmp}.json"
-    if not g.api.file.exists(team.id, cls2tag_tf_path):
-        sly.logger.info(f"File {cls2tag_tf_path!r} not exists. Forcing stats recalculation.")
-        force_stats_recalc = True
 
     updated_images, updated_classes, _cache = u.get_updated_images_and_classes(
         project, project_meta, datasets, force_stats_recalc, _cache
