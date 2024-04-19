@@ -160,6 +160,11 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     if not g.api.file.exists(team.id, heatmaps_tf_path):
         sly.logger.info(f"File {heatmaps_tf_path!r} not exists. Forcing stats recalculation.")
         force_stats_recalc = True
+    tmp = dtools.ClassToTagCooccurrence(project_meta).basename_stem
+    cls2tag_tf_path = f"{tf_project_dir}/{tmp}.json"
+    if not g.api.file.exists(team.id, cls2tag_tf_path):
+        sly.logger.info(f"File {cls2tag_tf_path!r} not exists. Forcing stats recalculation.")
+        force_stats_recalc = True
 
     updated_images, updated_classes, _cache = u.get_updated_images_and_classes(
         project, project_meta, datasets, force_stats_recalc, _cache

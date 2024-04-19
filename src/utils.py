@@ -248,17 +248,21 @@ def check_idxs_integrity(
             )  # TODO
             return get_project_images_all(datasets)
     else:
-        for stat in stats:
-            files = sly.fs.list_files(
-                f"{projectfs_dir}/{stat.basename_stem}",
-                [".npy"],
-            )
+        try:
+            for stat in stats:
+                files = sly.fs.list_files(
+                    f"{projectfs_dir}/{stat.basename_stem}",
+                    [".npy"],
+                )
 
-            if len(files) != len(idx_to_infos.keys()):
-                msg = f"The number of images in the project has changed. Check chunks in Team Files: {projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
-                sly.logger.warning(msg)
-                # raise RuntimeError(msg)
-                return get_project_images_all(datasets)
+                if len(files) != len(idx_to_infos.keys()):
+                    msg = f"The number of images in the project has changed. Check chunks in Team Files: {projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
+                    sly.logger.warning(msg)
+                    # raise RuntimeError(msg)
+                    return get_project_images_all(datasets)
+        except:
+            sly.logger.warning("Error while integrity checking. Recalc full stats.")
+            return get_project_images_all(datasets)
 
     return updated_images
 
