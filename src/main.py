@@ -201,13 +201,13 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
-    # u.calculate_and_save_heatmaps(
-    #     datasets,
-    #     project_fs_dir,
-    #     heatmaps,
-    #     heatmaps_image_ids,
-    #     heatmaps_figure_ids,
-    # )
+    u.calculate_and_save_heatmaps(
+        datasets,
+        project_fs_dir,
+        heatmaps,
+        heatmaps_image_ids,
+        heatmaps_figure_ids,
+    )
 
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
     thread = threading.Thread(
