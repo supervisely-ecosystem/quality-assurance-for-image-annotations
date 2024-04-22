@@ -598,7 +598,10 @@ def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
         unit="B",
         unit_scale=True,
     ) as pbar:
-        g.api.file.upload_bulk(team_id, stats_paths, dst_json_paths, pbar)
+        try:
+            g.api.file.upload_bulk(team_id, stats_paths, dst_json_paths, pbar)
+        except:
+            pass
 
     sly.logger.info(
         f"{len(stats_paths)} updated .json and .png stats succesfully updated and uploaded"
