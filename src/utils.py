@@ -547,10 +547,8 @@ def calculate_and_save_heatmaps(
                     filtered = [x for x in figs if x.id in heatmaps_figure_ids[x.class_id]]
                     heatmaps.update2(image, filtered, skip_broken_geometry=True)
                     pbar.update(1)
-    t = sly.TinyTimer()
-    sly.logger.debug(f"start to_image: {t.get_sec()} secs.")
+
     heatmaps.to_image(f"{project_fs_dir}/{heatmaps.basename_stem}.png")
-    sly.logger.debug(f"Heatmaps: {t.get_sec()} secs.")
 
 
 @sly.timeit
