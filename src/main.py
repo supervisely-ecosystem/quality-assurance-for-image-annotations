@@ -148,7 +148,8 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         dtools.ObjectSizes(project_meta, project_stats),
         dtools.ClassSizes(project_meta),
         dtools.ClassesTreemap(project_meta),
-        dtools.TagsCooccurrence(project_meta),
+        dtools.TagsImagesCooccurrence(project_meta),
+        dtools.TagsObjectsCooccurrence(project_meta),
         dtools.ClassToTagCooccurrence(project_meta),
         # dtools.OneOfTagsDistribution(project_meta),
     ]
@@ -188,7 +189,7 @@ def main_func(team: TeamInfo, project: ProjectInfo):
 
     tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]
 
-    heatmaps_image_ids = u.calculate_stats_and_save_chunks(
+    heatmaps_image_ids, heatmaps_figure_ids = u.calculate_stats_and_save_chunks(
         updated_images,
         stats,
         tf_all_paths,
@@ -200,11 +201,12 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
-    force_htmap_recalc = False
-    if force_stats_recalc is True or len(updated_images) > 0 or len(updated_classes) > 0:
-        force_htmap_recalc = True
     # u.calculate_and_save_heatmaps(
-    #     datasets, project_fs_dir, heatmaps, heatmaps_image_ids, force_htmap_recalc
+    #     datasets,
+    #     project_fs_dir,
+    #     heatmaps,
+    #     heatmaps_image_ids,
+    #     heatmaps_figure_ids,
     # )
 
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")

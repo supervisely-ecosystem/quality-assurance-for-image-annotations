@@ -155,9 +155,13 @@ def push_cache(
 
 
 def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
-    return {d.id: g.api.image.get_list(d.id) for d in datasets}
+    if g.IMAGES_ALL_DCT is not None:
+        return g.IMAGES_ALL_DCT
+    g.IMAGES_ALL_DCT = {d.id: g.api.image.get_list(d.id) for d in datasets}
+    return g.IMAGES_ALL_DCT
 
 
+@sly.timeit
 def get_updated_images_and_classes(
     project: ProjectInfo,
     project_meta: ProjectMeta,
@@ -238,11 +242,13 @@ def get_updated_images_and_classes(
     return updated_images, updated_classes, _cache
 
 
+@sly.timeit
 def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, dict]:
     chunk_to_images, image_to_chunk = {}, {}
 
+    images_all_dct = get_project_images_all(datasets)
     for dataset in datasets:
-        images_all = g.api.image.get_list(dataset.id)  # TODO optimie speed
+        images_all = images_all_dct[dataset.id]
         images_all = sorted(images_all, key=lambda x: x.id)
 
         for idx, image_batch in enumerate(sly.batched(images_all, g.CHUNK_SIZE)):
@@ -254,6 +260,7 @@ def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, 
     return chunk_to_images, image_to_chunk
 
 
+@sly.timeit
 def check_idxs_integrity(
     project, datasets, stats, projectfs_dir, idx_to_infos, updated_images, force_stats_recalc
 ) -> list:
@@ -266,7 +273,7 @@ def check_idxs_integrity(
             total_updated = sum(len(lst) for lst in updated_images.values())
             sly.logger.warning(
                 f"The number of updated images ({total_updated}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
-            )  # TODO
+            )
             return get_project_images_all(datasets)
     else:
         try:
@@ -410,8 +417,9 @@ def calculate_stats_and_save_chunks(
     chunk_to_images,
     image_to_chunk,
 ) -> Dict[int, Set[ImageInfo]]:
-    heatmaps_figure_ids = defaultdict(list)
+    # heatmaps_figure_ids = defaultdict(list)
     heatmaps_image_ids = defaultdict(set)
+    heatmaps_figure_ids = defaultdict(set)
     total_updated = sum(len(lst) for lst in updated_images.values())
     sly.logger.info(f"Start calculating stats for {total_updated} images.")
     with tqdm(desc="Calculating stats", total=total_updated) as pbar:
@@ -443,7 +451,7 @@ def calculate_stats_and_save_chunks(
         if pbar.last_print_n < pbar.total:  # unlabeled images
             pbar.update(pbar.total - pbar.n)
 
-    return heatmaps_image_ids
+    return heatmaps_image_ids, heatmaps_figure_ids
 
 
 # @sly.timeit
@@ -509,8 +517,8 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
 
 def _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs: List[FigureInfo]):
     for fig in figs:
-        if len(heatmaps_figure_ids.get(fig.class_id, [])) < 30:
-            heatmaps_figure_ids[fig.class_id].append(fig.id)
+        if len(heatmaps_figure_ids.get(fig.class_id, [])) < 50:
+            heatmaps_figure_ids[fig.class_id].add(fig.id)
             heatmaps_image_ids[fig.dataset_id].add(fig.entity_id)
 
 
@@ -519,19 +527,10 @@ def calculate_and_save_heatmaps(
     project_fs_dir: str,
     heatmaps: dtools.ClassesHeatmaps,
     heatmaps_image_ids: Dict[int, Set[int]],
-    force_heatmaps_recalc: bool = False,
+    heatmaps_figure_ids: Dict[int, Set[int]],
 ):
     if len(heatmaps_image_ids) == 0:
         return
-    if force_heatmaps_recalc is True:
-        heatmaps_image_ids = defaultdict(set)
-        for dataset in datasets:
-            data = g.api.image.get_list(dataset.id)
-            share = 0.2 if len(data) > 1000 else 1
-            sample_size = int(len(data) * share)
-            sampled_data = random.sample(data, sample_size)
-            for image in sampled_data:
-                heatmaps_image_ids[image.dataset_id].add(image.id)
 
     sample_total = sum(len(lst) for lst in heatmaps_image_ids.values())
     with tqdm(desc="Calculating heatmaps from sample", total=sample_total) as pbar:
@@ -544,7 +543,9 @@ def calculate_and_save_heatmaps(
                 figures = g.api.image.figure.download(dataset_id, batch_ids)
 
                 for image in batch_infos:
-                    heatmaps.update2(image, figures.get(image.id, []), skip_broken_geometry=True)
+                    figs = figures.get(image.id, [])
+                    filtered = [x for x in figs if x.id in heatmaps_figure_ids[x.class_id]]
+                    heatmaps.update2(image, filtered, skip_broken_geometry=True)
                     pbar.update(1)
     heatmaps.to_image(f"{project_fs_dir}/{heatmaps.basename_stem}.png")
 
