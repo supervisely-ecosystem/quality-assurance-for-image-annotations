@@ -155,10 +155,11 @@ def push_cache(
 
 
 def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
-    if g.IMAGES_ALL_DCT is not None:
-        return g.IMAGES_ALL_DCT
-    g.IMAGES_ALL_DCT = {d.id: g.api.image.get_list(d.id) for d in datasets}
-    return g.IMAGES_ALL_DCT
+    # if g.IMAGES_ALL_DCT is not None:
+    #     return g.IMAGES_ALL_DCT
+    # g.IMAGES_ALL_DCT = {d.id: g.api.image.get_list(d.id) for d in datasets}
+    # return g.IMAGES_ALL_DCT
+    return {d.id: g.api.image.get_list(d.id) for d in datasets}
 
 
 @sly.timeit
