@@ -202,7 +202,6 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
     u.calculate_and_save_heatmaps(
-        datasets,
         project_fs_dir,
         heatmaps,
         heatmaps_image_ids,
