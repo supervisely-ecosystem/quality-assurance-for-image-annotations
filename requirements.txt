@@ -1,4 +1,4 @@
-dataset-tools==0.0.67
+dataset-tools==0.0.68
 humanize
 ujson
 scikit-image==0.21.0

@@ -310,6 +310,7 @@ def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
     sly.logger.info("The consistency of data is OK")
 
 
+@sly.timeit
 def remove_junk(team_id, tf_project_dir, project, datasets, project_fs_dir):
     files_fs = list_files_recursively(project_fs_dir, valid_extensions=[".npy"])
     ds_ids, rm_cnt = [str(dataset.id) for dataset in datasets], 0
