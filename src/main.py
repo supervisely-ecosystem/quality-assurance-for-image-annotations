@@ -151,7 +151,8 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         dtools.TagsImagesCooccurrence(project_meta),
         dtools.TagsObjectsCooccurrence(project_meta),
         dtools.ClassToTagCooccurrence(project_meta),
-        dtools.TagsOneOfDistribution(project_meta),
+        dtools.TagsImagesOneOfDistribution(project_meta),
+        dtools.TagsObjectsOneOfDistribution(project_meta),
     ]
 
     heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
