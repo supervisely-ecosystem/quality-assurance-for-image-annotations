@@ -86,6 +86,8 @@ def stats_endpoint(project_id: int, user_id: int = None):
 
 
 def _remove_old_active_project_request(now, team, file):
+    if sly.is_development():
+        g.api.file.remove(team.id, file.path)
     dt = datetime.fromisoformat(file.updated_at[:-1]).replace(tzinfo=timezone.utc)
     if (now - dt).seconds > TIMELOCK_LIMIT:
         g.api.file.remove(team.id, file.path)
