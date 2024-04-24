@@ -23,7 +23,7 @@ sly.fs.mkdir(ACTIVE_REQUESTS_DIR, remove_content_if_exists=True)
 TF_ACTIVE_REQUESTS_DIR = f"{TF_STATS_DIR}/_active_requests"
 
 # IMAGES_ALL_DCT = None
-CHUNK_SIZE: int = 1000
+CHUNK_SIZE: int = 3
 MINIMUM_DTOOLS_VERSION: str = (
-    "0.0.69"  # force stats to fully recalculate (f.e. when added new statistics)
+    "0.0.70"  # force stats to fully recalculate (f.e. when added new statistics)
 )
