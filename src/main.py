@@ -141,16 +141,16 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     )
 
     stats = [
-        # dtools.ClassBalance(project_meta, project_stats),
-        # dtools.ClassCooccurrence(project_meta),
-        # dtools.ClassesPerImage(project_meta, project_stats, datasets),
-        # dtools.ObjectsDistribution(project_meta),
-        # dtools.ObjectSizes(project_meta, project_stats),
-        # dtools.ClassSizes(project_meta),
-        # dtools.ClassesTreemap(project_meta),
-        # dtools.TagsImagesCooccurrence(project_meta),
-        # dtools.TagsObjectsCooccurrence(project_meta),
-        # dtools.ClassToTagCooccurrence(project_meta),
+        dtools.ClassBalance(project_meta, project_stats),
+        dtools.ClassCooccurrence(project_meta),
+        dtools.ClassesPerImage(project_meta, project_stats, datasets),
+        dtools.ObjectsDistribution(project_meta),
+        dtools.ObjectSizes(project_meta, project_stats),
+        dtools.ClassSizes(project_meta),
+        dtools.ClassesTreemap(project_meta),
+        dtools.TagsImagesCooccurrence(project_meta),
+        dtools.TagsObjectsCooccurrence(project_meta),
+        dtools.ClassToTagCooccurrence(project_meta),
         dtools.TagsImagesOneOfDistribution(project_meta),
         dtools.TagsObjectsOneOfDistribution(project_meta),
     ]
