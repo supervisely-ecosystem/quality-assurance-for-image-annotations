@@ -1,5 +1,5 @@
 import os
-
+import json
 
 from collections import defaultdict
 import src.globals as g
@@ -170,7 +170,6 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
-        # sly.fs.silent_remove(active_project_path)
         g.api.file.remove(team.id, active_project_path_tf)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
@@ -208,12 +207,19 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
+    # sly.logger.debug("Start threading of 'calculate_and_save_heatmaps'")
+    # thread1 = threading.Thread(
+    #     target=u.calculate_and_save_heatmaps,
+    #     args=(project_fs_dir, heatmaps, heatmaps_image_ids, heatmaps_figure_ids),
+    # )
+    # thread1.start()
+
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
-    thread = threading.Thread(
+    thread2 = threading.Thread(
         target=u.archive_chunks_and_upload,
         args=(team.id, project, stats, tf_project_dir, project_fs_dir),
     )
-    thread.start()
+    thread2.start()
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project.id, tf_project_dir, project_fs_dir, _cache)
@@ -222,27 +228,80 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
 
 
-@server.get("/heatmaps-status")
-def calc_heatmaps(datasets, project_fs_dir, heatmaps, heatmaps_image_ids, heatmaps_figure_ids):
-    try:
-        u.calculate_and_save_heatmaps(
-            datasets,
-            project_fs_dir,
-            heatmaps,
-            heatmaps_image_ids,
-            heatmaps_figure_ids,
-        )
-    except Exception as e:
-        msg = e.__class__.__name__ + ": " + str(e)
-        sly.logger.error(msg)
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "title": "The app has got the following error:",
-                "message": msg,
-            },
-        ) from e
+# @server.get("/heatmaps")
+# def calc_heatmaps(project_id: int, user_id: int = None):
+#     project = None
+#     team = None
+#     workspace = None
 
-    return JSONResponse(
-        {"message": f"Heatmaps for {len(heatmaps_image_ids)} images were calculated."}
-    )
+#     try:
+#         project = g.api.project.get_info_by_id(project_id, raise_error=True)
+#         team = g.api.team.get_info_by_id(project.team_id, raise_error=True)
+#         workspace = g.api.workspace.get_info_by_id(project.workspace_id, raise_error=True)
+
+#         result = heatmaps_func(team, project)
+
+#     except Exception as e:
+#         msg = e.__class__.__name__ + ": " + str(e)
+#         xtr = _get_extra(user_id, team, workspace, project)
+#         sly.logger.error(msg, extra=xtr)
+#         raise HTTPException(
+#             status_code=500,
+#             detail={
+#                 "title": "The app has got the following error:",
+#                 "message": msg,
+#             },
+#         ) from e
+
+#     return result
+
+
+# def heatmaps_func(team: TeamInfo, project: ProjectInfo):
+
+#     tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
+#     project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
+
+#     json_project_meta = g.api.project.get_meta(project.id)
+#     project_meta = sly.ProjectMeta.from_json(json_project_meta)
+
+#     project_stats = g.api.project.get_stats(project.id)
+#     heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
+
+#     heatmaps_meta = f"{project_fs_dir}/_cache/heatmaps/"
+#     imgs_path = heatmaps_meta + "heatmaps_image_ids.json"
+#     figs_path = heatmaps_meta + "heatmaps_figure_ids.json"
+#     heatmaps_image_ids = wait_for_json_file(imgs_path)
+#     heatmaps_figure_ids = wait_for_json_file(figs_path)
+
+#     u.calculate_and_save_heatmaps(
+#         project_fs_dir,
+#         heatmaps,
+#         heatmaps_image_ids,
+#         heatmaps_figure_ids,
+#     )
+
+#     sly.fs.silent_remove(imgs_path)
+#     sly.fs.silent_remove(figs_path)
+
+#     return JSONResponse(
+#         {"message": f"The stats for {len(heatmaps_image_ids)} images were calculated."}
+#     )
+
+
+# def read_json_file(filename):
+#     try:
+#         with open(filename, "r") as json_file:
+#             data = json_file.read()
+#             print(f"JSON data found: {data}")
+#             return data
+#     except FileNotFoundError:
+#         return None
+
+
+# def wait_for_json_file(filename, interval=1):
+#     while True:
+#         json_data = read_json_file(filename)
+#         if json_data:
+#             return json_data
+#         sly.logger.debug(f"Waiting for {filename} to appear...")
+#         time.sleep(interval)

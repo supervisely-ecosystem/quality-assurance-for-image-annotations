@@ -529,7 +529,6 @@ def _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs: List[
 
 
 def calculate_and_save_heatmaps(
-    datasets: List[DatasetInfo],
     project_fs_dir: str,
     heatmaps: dtools.ClassesHeatmaps,
     heatmaps_image_ids: Dict[int, Set[int]],
@@ -553,7 +552,12 @@ def calculate_and_save_heatmaps(
                     filtered = [x for x in figs if x.id in heatmaps_figure_ids[x.class_id]]
                     heatmaps.update2(image, filtered, skip_broken_geometry=True)
                     pbar.update(1)
-    heatmaps.to_image(f"{project_fs_dir}/{heatmaps.basename_stem}.png")
+
+    # heatmap_path = f"{project_fs_dir}/{heatmaps.basename_stem}.png"
+    # tf_heatmap_path = f"{tf}/{heatmaps.basename_stem}.png"
+    # heatmaps.to_image()
+
+    # g.api.file.upload
 
 
 @sly.timeit
@@ -592,13 +596,13 @@ def archive_chunks_and_upload(
 @sly.timeit
 def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
     remove_files_with_null(curr_projectfs_dir)
-    stats_paths = list_files(curr_projectfs_dir, valid_extensions=[".json", ".png"])
+    stats_paths = list_files(curr_projectfs_dir, valid_extensions=[".json"])
     dst_json_paths = [
         f"{curr_tf_project_dir}/{get_file_name_with_ext(path)}" for path in stats_paths
     ]
 
     with tqdm(
-        desc="Uploading .json and .png stats",
+        desc="Uploading .json stats",
         total=sum([get_file_size(path) for path in stats_paths]),
         unit="B",
         unit_scale=True,
