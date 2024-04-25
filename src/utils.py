@@ -564,7 +564,10 @@ def calculate_and_upload_heatmaps(
 
     g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
     sly.logger.info(f"The {heatmaps_name!r} file was succesfully uploaded.")
+    add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
 
+
+def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
     status_path = f"{project_fs_dir}/_cache/heatmaps/status_ok"
     tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
     os.makedirs(f"{project_fs_dir}/_cache/heatmaps", exist_ok=True)

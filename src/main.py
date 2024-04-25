@@ -72,10 +72,10 @@ def stats_endpoint(project_id: int, user_id: int = None):
         active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
         sly.fs.silent_remove(active_project_path)
         tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
-        tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+        project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
         if team is not None:
             g.api.file.remove(team.id, active_project_path_tf)
-            g.api.file.remove(team.id, tf_status_path)
+            u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
 
         raise HTTPException(
             status_code=500,
@@ -174,6 +174,7 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     if total_updated == 0:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
         g.api.file.remove(team.id, active_project_path_tf)
+        u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
     if (
@@ -238,82 +239,3 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     # sly.fs.silent_remove(active_project_path)
     g.api.file.remove(team.id, active_project_path_tf)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
-
-
-# @server.get("/heatmaps")
-# def calc_heatmaps(project_id: int, user_id: int = None):
-#     project = None
-#     team = None
-#     workspace = None
-
-#     try:
-#         project = g.api.project.get_info_by_id(project_id, raise_error=True)
-#         team = g.api.team.get_info_by_id(project.team_id, raise_error=True)
-#         workspace = g.api.workspace.get_info_by_id(project.workspace_id, raise_error=True)
-
-#         result = heatmaps_func(team, project)
-
-#     except Exception as e:
-#         msg = e.__class__.__name__ + ": " + str(e)
-#         xtr = _get_extra(user_id, team, workspace, project)
-#         sly.logger.error(msg, extra=xtr)
-#         raise HTTPException(
-#             status_code=500,
-#             detail={
-#                 "title": "The app has got the following error:",
-#                 "message": msg,
-#             },
-#         ) from e
-
-#     return result
-
-
-# def heatmaps_func(team: TeamInfo, project: ProjectInfo):
-
-#     tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
-#     project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
-
-#     json_project_meta = g.api.project.get_meta(project.id)
-#     project_meta = sly.ProjectMeta.from_json(json_project_meta)
-
-#     project_stats = g.api.project.get_stats(project.id)
-#     heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
-
-#     heatmaps_meta = f"{project_fs_dir}/_cache/heatmaps/"
-#     imgs_path = heatmaps_meta + "heatmaps_image_ids.json"
-#     figs_path = heatmaps_meta + "heatmaps_figure_ids.json"
-#     heatmaps_image_ids = wait_for_json_file(imgs_path)
-#     heatmaps_figure_ids = wait_for_json_file(figs_path)
-
-#     u.calculate_and_save_heatmaps(
-#         project_fs_dir,
-#         heatmaps,
-#         heatmaps_image_ids,
-#         heatmaps_figure_ids,
-#     )
-
-#     sly.fs.silent_remove(imgs_path)
-#     sly.fs.silent_remove(figs_path)
-
-#     return JSONResponse(
-#         {"message": f"The stats for {len(heatmaps_image_ids)} images were calculated."}
-#     )
-
-
-# def read_json_file(filename):
-#     try:
-#         with open(filename, "r") as json_file:
-#             data = json_file.read()
-#             print(f"JSON data found: {data}")
-#             return data
-#     except FileNotFoundError:
-#         return None
-
-
-# def wait_for_json_file(filename, interval=1):
-#     while True:
-#         json_data = read_json_file(filename)
-#         if json_data:
-#             return json_data
-#         sly.logger.debug(f"Waiting for {filename} to appear...")
-#         time.sleep(interval)
