@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import json, time
 from packaging.version import Version
 import tarfile
@@ -8,7 +10,7 @@ import dataset_tools as dtools
 from dataset_tools.image.stats.basestats import BaseStats
 from datetime import datetime
 import humanize
-from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo, FigureInfo
+from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo, FigureInfo, TeamInfo
 from itertools import groupby
 from tqdm import tqdm
 import supervisely as sly
@@ -528,7 +530,9 @@ def _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs: List[
             heatmaps_image_ids[fig.dataset_id].add(fig.entity_id)
 
 
-def calculate_and_save_heatmaps(
+def calculate_and_upload_heatmaps(
+    team: TeamInfo,
+    tf_project_dir: str,
     project_fs_dir: str,
     heatmaps: dtools.ClassesHeatmaps,
     heatmaps_image_ids: Dict[int, Set[int]],
@@ -553,16 +557,24 @@ def calculate_and_save_heatmaps(
                     heatmaps.update2(image, filtered, skip_broken_geometry=True)
                     pbar.update(1)
 
-    # heatmap_path = f"{project_fs_dir}/{heatmaps.basename_stem}.png"
-    # tf_heatmap_path = f"{tf}/{heatmaps.basename_stem}.png"
-    # heatmaps.to_image()
+    heatmaps_name = f"{heatmaps.basename_stem}.png"
+    fs_heatmap_path = f"{project_fs_dir}/{heatmaps_name}"
+    tf_heatmap_path = f"{tf_project_dir}/{heatmaps_name}"
+    heatmaps.to_image(fs_heatmap_path)
 
-    # g.api.file.upload
+    g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
+    sly.logger.info(f"The {heatmaps_name!r} file was succesfully uploaded.")
+
+    status_path = f"{project_fs_dir}/_cache/heatmaps/status_ok"
+    tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+    os.makedirs(f"{project_fs_dir}/_cache/heatmaps", exist_ok=True)
+    Path(status_path).touch()
+    g.api.file.upload(team.id, status_path, tf_status_path)
 
 
 @sly.timeit
 def archive_chunks_and_upload(
-    team_id,
+    team: TeamInfo,
     project: ProjectInfo,
     stats: List[BaseStats],
     tf_project_dir,
@@ -588,7 +600,7 @@ def archive_chunks_and_upload(
         unit="B",
         unit_scale=True,
     ) as pbar:
-        g.api.file.upload(team_id, src_path, dst_path, progress_cb=pbar)
+        g.api.file.upload(team.id, src_path, dst_path, progress_cb=pbar)
 
     sly.logger.info(f"The '{archive_name}' file was succesfully uploaded.")
 

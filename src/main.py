@@ -71,8 +71,11 @@ def stats_endpoint(project_id: int, user_id: int = None):
         active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
         active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
         sly.fs.silent_remove(active_project_path)
+        tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
+        tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
         if team is not None:
             g.api.file.remove(team.id, active_project_path_tf)
+            g.api.file.remove(team.id, tf_status_path)
 
         raise HTTPException(
             status_code=500,
@@ -180,6 +183,8 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         force_stats_recalc = u.download_stats_chunks_to_buffer(
             team.id, project, tf_project_dir, project_fs_dir, force_stats_recalc
         )
+        tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+        g.api.file.remove(team.id, tf_status_path)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project.id, datasets, images_all_dct)
     updated_images = u.check_idxs_integrity(
@@ -207,17 +212,24 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
-    # sly.logger.debug("Start threading of 'calculate_and_save_heatmaps'")
-    # thread1 = threading.Thread(
-    #     target=u.calculate_and_save_heatmaps,
-    #     args=(project_fs_dir, heatmaps, heatmaps_image_ids, heatmaps_figure_ids),
-    # )
-    # thread1.start()
+    sly.logger.debug("Start threading of 'calculate_and_save_heatmaps'")
+    thread1 = threading.Thread(
+        target=u.calculate_and_upload_heatmaps,
+        args=(
+            team,
+            tf_project_dir,
+            project_fs_dir,
+            heatmaps,
+            heatmaps_image_ids,
+            heatmaps_figure_ids,
+        ),
+    )
+    thread1.start()
 
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
     thread2 = threading.Thread(
         target=u.archive_chunks_and_upload,
-        args=(team.id, project, stats, tf_project_dir, project_fs_dir),
+        args=(team, project, stats, tf_project_dir, project_fs_dir),
     )
     thread2.start()
 
