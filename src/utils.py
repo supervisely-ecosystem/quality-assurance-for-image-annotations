@@ -154,11 +154,8 @@ def push_cache(
     return _cache
 
 
+@sly.timeit
 def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
-    # if g.IMAGES_ALL_DCT is not None:
-    #     return g.IMAGES_ALL_DCT
-    # g.IMAGES_ALL_DCT = {d.id: g.api.image.get_list(d.id) for d in datasets}
-    # return g.IMAGES_ALL_DCT
     return {d.id: g.api.image.get_list(d.id) for d in datasets}
 
 
@@ -167,6 +164,7 @@ def get_updated_images_and_classes(
     project: ProjectInfo,
     project_meta: ProjectMeta,
     datasets: List[DatasetInfo],
+    images_all_dct,
     force_stats_recalc: bool,
     _cache: dict,
 ) -> Tuple[List[ImageInfo], List[str]]:
@@ -178,7 +176,6 @@ def get_updated_images_and_classes(
         sly.logger.info("The project is fully unlabeled")
         return {}, {}, {}
 
-    images_all_dct = get_project_images_all(datasets)
     images_all_flat = []
     for value in images_all_dct.values():
         images_all_flat.extend(value)
@@ -244,10 +241,11 @@ def get_updated_images_and_classes(
 
 
 @sly.timeit
-def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, dict]:
+def get_indexes_dct(
+    project_id: id, datasets: List[DatasetInfo], images_all_dct
+) -> Tuple[dict, dict]:
     chunk_to_images, image_to_chunk = {}, {}
 
-    images_all_dct = get_project_images_all(datasets)
     for dataset in datasets:
         images_all = images_all_dct[dataset.id]
         images_all = sorted(images_all, key=lambda x: x.id)
@@ -263,10 +261,17 @@ def get_indexes_dct(project_id: id, datasets: List[DatasetInfo]) -> Tuple[dict, 
 
 @sly.timeit
 def check_idxs_integrity(
-    project, datasets, stats, projectfs_dir, idx_to_infos, updated_images, force_stats_recalc
+    project,
+    datasets,
+    stats,
+    projectfs_dir,
+    idx_to_infos,
+    updated_images,
+    images_all_dct,
+    force_stats_recalc,
 ) -> list:
     if force_stats_recalc is True:
-        return get_project_images_all(datasets)
+        return images_all_dct
 
     if sly.fs.dir_empty(projectfs_dir):
         sly.logger.warning("The buffer is empty. Calculate full stats")
@@ -275,7 +280,7 @@ def check_idxs_integrity(
             sly.logger.warning(
                 f"The number of updated images ({total_updated}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
             )
-            return get_project_images_all(datasets)
+            return images_all_dct
     else:
         try:
             for stat in stats:
@@ -287,11 +292,10 @@ def check_idxs_integrity(
                 if len(files) != len(idx_to_infos.keys()):
                     msg = f"The number of images in the project has changed. Check chunks in Team Files: {projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
                     sly.logger.warning(msg)
-                    # raise RuntimeError(msg)
-                    return get_project_images_all(datasets)
+                    return images_all_dct
         except:
             sly.logger.warning("Error while integrity checking. Recalc full stats.")
-            return get_project_images_all(datasets)
+            return images_all_dct
 
     return updated_images
 

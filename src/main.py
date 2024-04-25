@@ -163,8 +163,9 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
+    images_all_dct = u.get_project_images_all(datasets)
     updated_images, updated_classes, _cache = u.get_updated_images_and_classes(
-        project, project_meta, datasets, force_stats_recalc, _cache
+        project, project_meta, datasets, images_all_dct, force_stats_recalc, _cache
     )
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0:
@@ -172,8 +173,6 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         # sly.fs.silent_remove(active_project_path)
         g.api.file.remove(team.id, active_project_path_tf)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
-
-    # updated_images = u.get_project_images_all(project, datasets)  # !tmp
 
     if (
         g.api.file.dir_exists(team.id, tf_project_dir) is True
@@ -183,11 +182,16 @@ def main_func(team: TeamInfo, project: ProjectInfo):
             team.id, project, tf_project_dir, project_fs_dir, force_stats_recalc
         )
 
-    # u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
-
-    idx_to_infos, infos_to_idx = u.get_indexes_dct(project.id, datasets)
+    idx_to_infos, infos_to_idx = u.get_indexes_dct(project.id, datasets, images_all_dct)
     updated_images = u.check_idxs_integrity(
-        project, datasets, stats, project_fs_dir, idx_to_infos, updated_images, force_stats_recalc
+        project,
+        datasets,
+        stats,
+        project_fs_dir,
+        idx_to_infos,
+        updated_images,
+        images_all_dct,
+        force_stats_recalc,
     )
 
     tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]
@@ -204,14 +208,6 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
-    # u.calculate_and_save_heatmaps(
-    #     datasets,
-    #     project_fs_dir,
-    #     heatmaps,
-    #     heatmaps_image_ids,
-    #     heatmaps_figure_ids,
-    # )
-
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
     thread = threading.Thread(
         target=u.archive_chunks_and_upload,
@@ -224,3 +220,29 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     # sly.fs.silent_remove(active_project_path)
     g.api.file.remove(team.id, active_project_path_tf)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
+
+
+@server.get("/heatmaps-status")
+def calc_heatmaps(datasets, project_fs_dir, heatmaps, heatmaps_image_ids, heatmaps_figure_ids):
+    try:
+        u.calculate_and_save_heatmaps(
+            datasets,
+            project_fs_dir,
+            heatmaps,
+            heatmaps_image_ids,
+            heatmaps_figure_ids,
+        )
+    except Exception as e:
+        msg = e.__class__.__name__ + ": " + str(e)
+        sly.logger.error(msg)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "title": "The app has got the following error:",
+                "message": msg,
+            },
+        ) from e
+
+    return JSONResponse(
+        {"message": f"Heatmaps for {len(heatmaps_image_ids)} images were calculated."}
+    )
