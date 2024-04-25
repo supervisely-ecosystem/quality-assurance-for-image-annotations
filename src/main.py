@@ -166,6 +166,20 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         sly.fs.clean_dir(project_fs_dir)
     os.makedirs(project_fs_dir, exist_ok=True)
 
+    if g.api.file.dir_exists(team.id, tf_project_dir):
+        for stat in stats:
+            path = f"{tf_project_dir}/{stat.basename_stem}.json"
+            if not g.api.file.exists(team.id, path):
+                force_stats_recalc = True
+                sly.logger.warning(
+                    f"The calcuated stat {stat.basename_stem!r} not exists. Forcing full stats recalculation..."
+                )
+        if not g.api.file.exists(team.id, f"{tf_project_dir}/{heatmaps.basename_stem}.png"):
+            force_stats_recalc = True
+            sly.logger.warning(
+                f"The calcuated stat {heatmaps.basename_stem!r} not exists. Forcing full stats recalculation..."
+            )
+
     images_all_dct = u.get_project_images_all(datasets)
     updated_images, updated_classes, _cache = u.get_updated_images_and_classes(
         project, project_meta, datasets, images_all_dct, force_stats_recalc, _cache
