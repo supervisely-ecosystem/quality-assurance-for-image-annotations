@@ -201,6 +201,10 @@ def main_func(team: TeamInfo, project: ProjectInfo):
         tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
         g.api.file.remove(team.id, tf_status_path)
 
+    if force_stats_recalc is True:
+        tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+        g.api.file.remove(team.id, tf_status_path)
+
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project.id, datasets, images_all_dct)
     updated_images = u.check_idxs_integrity(
         project,
