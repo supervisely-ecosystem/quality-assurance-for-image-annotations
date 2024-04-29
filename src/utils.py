@@ -651,3 +651,9 @@ def remove_files_with_null(directory_path: str):
                         print(f"Removed {filename} as it contains null values.")
                 except json.JSONDecodeError:
                     print(f"Error decoding JSON in {filename}.")
+
+
+def applicability_test(stat):
+    if len(stat._tag_ids) == 0:
+        return False
+    return True
