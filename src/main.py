@@ -71,8 +71,9 @@ def stats_endpoint(project_id: int, user_id: int = None):
         active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
         active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
         sly.fs.silent_remove(active_project_path)
-        tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
-        project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
+        if project is not None:
+            tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
+            project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
         if team is not None:
             g.api.file.remove(team.id, active_project_path_tf)
             u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
