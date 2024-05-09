@@ -336,11 +336,14 @@ def remove_junk(team_id, tf_project_dir, project, datasets, project_fs_dir):
             grouped_paths[constant_part] = [newest_path]
 
     for path in old_paths:
-        os.remove(path)
-        rm_cnt += 1
+        if "heatmaps" not in path:
+            os.remove(path)
+            rm_cnt += 1
 
     for path in files_fs:
-        if (path.split("_")[-4] not in ds_ids) or (f"_{project.id}_{g.CHUNK_SIZE}_" not in path):
+        if (
+            (path.split("_")[-4] not in ds_ids) or (f"_{project.id}_{g.CHUNK_SIZE}_" not in path)
+        ) and ("heatmaps" not in path):
             os.remove(path)
             rm_cnt += 1
 
@@ -580,6 +583,7 @@ def archive_chunks_and_upload(
     team: TeamInfo,
     project: ProjectInfo,
     stats: List[BaseStats],
+    heatmaps: dtools.ClassesHeatmaps,
     tf_project_dir,
     project_fs_dir,
 ):
@@ -589,7 +593,9 @@ def archive_chunks_and_upload(
                 tar.add(folder, arcname=os.path.basename(folder))
         return sly.fs.get_file_size(archive_path)
 
-    folders_to_compress = [f"{project_fs_dir}/{stat.basename_stem}" for stat in stats]
+    folders_to_compress = [f"{project_fs_dir}/{stat.basename_stem}" for stat in stats] + [
+        f"{project_fs_dir}/{heatmaps.basename_stem}"
+    ]
 
     dt_identifier = g.CHUNKS_LATEST_DATETIME
     archive_name = f"{project.id}_{project.name}_chunks_{dt_identifier.isoformat()}.tar.gz"

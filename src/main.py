@@ -258,29 +258,34 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
 
-    sly.logger.debug("Start threading of 'calculate_and_save_heatmaps'")
-    thread1 = threading.Thread(
-        target=u.calculate_and_upload_heatmaps,
+    {"imgs": dict(heatmaps_image_ids), "figs": dict(heatmaps_figure_ids)}
+
+    sly.logger.debug(
+        "Start threading of 'calculate_and_save_heatmaps' and 'archive_chunks_and_upload"
+    )
+    thread = threading.Thread(
+        target=threading_seq,
         args=(
-            team,
-            tf_project_dir,
-            project_fs_dir,
-            heatmaps,
-            heatmaps_image_ids,
-            heatmaps_figure_ids,
+            (
+                team,
+                tf_project_dir,
+                project_fs_dir,
+                heatmaps,
+                heatmaps_image_ids,
+                heatmaps_figure_ids,
+            ),
+            (team, project, stats, heatmaps, tf_project_dir, project_fs_dir),
         ),
     )
-    thread1.start()
-
-    sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
-    thread2 = threading.Thread(
-        target=u.archive_chunks_and_upload,
-        args=(team, project, stats, tf_project_dir, project_fs_dir),
-    )
-    thread2.start()
+    thread.start()
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project.id, tf_project_dir, project_fs_dir, _cache)
     # sly.fs.silent_remove(active_project_path)
     g.api.file.remove(team.id, active_project_path_tf)
     return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
+
+
+def threading_seq(args1, args2):
+    u.calculate_and_upload_heatmaps(*args1)
+    u.archive_chunks_and_upload(*args2)
