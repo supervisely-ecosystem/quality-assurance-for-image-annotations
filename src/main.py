@@ -123,7 +123,9 @@ def main_func(team: TeamInfo, project: ProjectInfo):
                     break
             return JSONResponse({"message": msg})
 
-    Path(active_project_path_local).touch()
+    # Path(active_project_path_local).touch()
+    with open(active_project_path_local, "w") as file:
+        pass
     g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
 
     sly.logger.info("Start Quality Assurance.")
