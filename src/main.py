@@ -5,7 +5,7 @@ from collections import defaultdict
 import src.globals as g
 import src.utils as u
 import supervisely as sly
-from supervisely import ProjectInfo, TeamInfo
+from supervisely import ProjectInfo, TeamInfo, WorkspaceInfo
 import dataset_tools as dtools
 from supervisely.io.fs import (
     get_file_name_with_ext,
@@ -61,7 +61,7 @@ def stats_endpoint(project_id: int, user_id: int = None):
         team = g.api.team.get_info_by_id(project.team_id, raise_error=True)
         workspace = g.api.workspace.get_info_by_id(project.workspace_id, raise_error=True)
 
-        result = main_func(team, project)
+        result = main_func(user_id, team, workspace, project)
 
     except Exception as e:
         msg = e.__class__.__name__ + ": " + str(e)
@@ -100,7 +100,7 @@ def _remove_old_active_project_request(now, team, file):
         )
 
 
-def main_func(team: TeamInfo, project: ProjectInfo):
+def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
 
     sly.logger.debug("Checking requests...")
 
@@ -142,7 +142,9 @@ def main_func(team: TeamInfo, project: ProjectInfo):
     project_stats = g.api.project.get_stats(project.id)
 
     sly.logger.info(f"Processing for the '{project.name}' project")
-    sly.logger.info(f"with the PROJECT_ID={project.id}")
+    sly.logger.info(
+        f"with the USER_ID={user_id} TEAM_ID={team.id} WORKSPACE_ID={workspace.id} PROJECT_ID={project.id}"
+    )
     sly.logger.info(f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
     sly.logger.info(
         f"The project consists of {project.items_count} images and has {project.datasets_count} datasets"
