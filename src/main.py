@@ -31,7 +31,7 @@ app = sly.Application(layout=layout, static_dir=static_dir)
 server = app.get_server()
 
 
-TIMELOCK_LIMIT = 100  # seconds
+TIMELOCK_LIMIT = 60  # seconds
 
 
 def _get_extra(user_id, team, workspace, project) -> dict:
@@ -137,7 +137,11 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     force_stats_recalc, _cache = u.pull_cache(team.id, project.id, tf_project_dir, project_fs_dir)
 
     json_project_meta = g.api.project.get_meta(project.id)
-    project_meta = sly.ProjectMeta.from_json(json_project_meta)
+    try:
+        project_meta = sly.ProjectMeta.from_json(json_project_meta)
+    except Exception:
+        json_project_meta = u.handle_broken_project_meta(json_project_meta)
+        project_meta = sly.ProjectMeta.from_json(json_project_meta)
     datasets = g.api.dataset.get_list(project.id)
     project_stats = g.api.project.get_stats(project.id)
 

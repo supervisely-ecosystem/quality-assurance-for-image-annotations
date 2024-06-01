@@ -26,6 +26,7 @@ from supervisely.io.fs import (
     get_file_size,
     list_files_recursively,
 )
+from supervisely.imaging.color import _validate_hex_color, hex2rgb, random_rgb, rgb2hex
 
 
 def pull_cache(
@@ -651,3 +652,22 @@ def applicability_test(stat):
     if len(stat._tag_ids) == 0:
         return False
     return True
+
+
+def handle_broken_project_meta(json_project_meta: dict) -> dict:
+    for idx, cls in enumerate(json_project_meta["classes"]):
+        # if _validate_hex_color(cls["color"]) is False:
+        #     new_color = rgb2hex(random_rgb())
+        #     sly.logger.warning(
+        #         f"'{cls['color']}' is not validated as hex. Trying to convert it to: {new_color}"
+        #     )
+        #     json_project_meta["classes"][idx]["color"] = new_color
+
+        for node, data in cls["geometry_config"]["nodes"].items():
+            curr_color = data.get("color")
+            new_color = rgb2hex(random_rgb())
+            if curr_color is not None:
+                if _validate_hex_color("#" + curr_color) is True:
+                    data["color"] = "#" + data["color"]
+
+    return json_project_meta
