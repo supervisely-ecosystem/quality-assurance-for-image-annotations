@@ -18,7 +18,7 @@ ACTIVE_REQUESTS_DIR = f"{STORAGE_DIR}/_active_requests"
 sly.fs.mkdir(ACTIVE_REQUESTS_DIR, remove_content_if_exists=True)
 TF_ACTIVE_REQUESTS_DIR = f"{TF_STATS_DIR}/_active_requests"
 
-CHUNK_SIZE: int = 1000
+CHUNK_SIZE: int = 3
 MINIMUM_DTOOLS_VERSION: str = (
-    "0.0.87"  # force stats to fully recalculate (f.e. when added new statistics)
+    "0.0.69"  # force stats to fully recalculate (f.e. when added new statistics)
 )

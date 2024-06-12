@@ -214,11 +214,11 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
             )
 
     images_all_dct = u.get_project_images_all(datasets)
-    updated_images, updated_classes, _cache = u.get_updated_images_and_classes(
+    updated_images, updated_classes, _cache, is_meta_changed = u.get_updated_images_and_classes(
         project, project_meta, datasets, images_all_dct, force_stats_recalc, _cache
     )
     total_updated = sum(len(lst) for lst in updated_images.values())
-    if total_updated == 0:
+    if total_updated == 0 and not is_meta_changed:
         sly.logger.info("Nothing to update. Skipping stats calculation...")
         g.api.file.remove(team.id, active_project_path_tf)
         u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
@@ -262,7 +262,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     )
     sly.logger.info("Stats calculation finished.")
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
-    u.sew_chunks_to_json(stats, project_fs_dir, updated_classes)
+    u.sew_chunks_to_json(stats, project_fs_dir, updated_classes, is_meta_changed)
 
     sly.logger.debug("Start threading of 'calculate_and_save_heatmaps'")
     thread1 = threading.Thread(
@@ -281,7 +281,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
     thread2 = threading.Thread(
         target=u.archive_chunks_and_upload,
-        args=(team, project, stats, tf_project_dir, project_fs_dir),
+        args=(team, project, stats, tf_project_dir, project_fs_dir, datasets),
     )
     thread2.start()
 
@@ -289,4 +289,6 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     u.push_cache(team.id, project.id, tf_project_dir, project_fs_dir, _cache)
     # sly.fs.silent_remove(active_project_path)
     g.api.file.remove(team.id, active_project_path_tf)
-    return JSONResponse({"message": f"The stats for {total_updated} images were calculated."})
+    return JSONResponse(
+        {"message": f"The statistics were updated: {total_updated} images were calculated"}
+    )

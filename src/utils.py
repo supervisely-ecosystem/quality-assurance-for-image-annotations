@@ -68,8 +68,6 @@ def pull_cache(
             f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated."
         )
         return True, _cache
-    else:
-        meta = sly.ProjectMeta().from_json(meta)
 
     if smeta.get("chunk_size", -1) != g.CHUNK_SIZE:
         sly.logger.warning("The chunk size has changed. Recalculating full stats...")
@@ -172,12 +170,14 @@ def get_updated_images_and_classes(
     _cache: dict,
 ) -> Tuple[List[ImageInfo], List[str]]:
     _images_cached = _cache.get("images", {})
-    _project_meta_cached = _cache.get("meta")
+    _meta_cached_json = _cache.get("meta")
+    _project_meta_cached = ProjectMeta.from_json(_meta_cached_json) if _meta_cached_json else None
+    is_meta_changed = compare_metas(project_meta, _project_meta_cached)
 
     updated_images, updated_classes = {d.id: [] for d in datasets}, {}
     if len(project_meta.obj_classes.items()) == 0:
         sly.logger.info("The project is fully unlabeled")
-        return {}, {}, {}
+        return {}, {}, {}, is_meta_changed
 
     images_all_flat = []
     for value in images_all_dct.values():
@@ -191,7 +191,7 @@ def get_updated_images_and_classes(
     _cache["meta"] = project_meta.to_json()
 
     if force_stats_recalc is True:
-        return images_all_dct, {}, _cache
+        return images_all_dct, {}, _cache, is_meta_changed
 
     if _project_meta_cached is not None:
         cached_classes = _project_meta_cached.obj_classes
@@ -232,7 +232,7 @@ def get_updated_images_and_classes(
             sly.logger.warning(f"The images with the following ids were deleted: {set_A - set_B}")
 
         sly.logger.info("Recalculate full statistics")
-        return images_all_dct, {}, _cache
+        return images_all_dct, {}, _cache, is_meta_changed
 
     num_updated = sum(len(lst) for lst in updated_images.values())
     if num_updated == project.items_count:
@@ -240,7 +240,7 @@ def get_updated_images_and_classes(
     elif num_updated > 0:
         sly.logger.info(f"The changes in {num_updated} images detected")
 
-    return updated_images, updated_classes, _cache
+    return updated_images, updated_classes, _cache, is_meta_changed
 
 
 @sly.timeit
@@ -496,7 +496,9 @@ def save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime):
 
 
 @sly.timeit
-def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
+def sew_chunks_to_json(
+    stats: List[BaseStats], project_fs_dir, updated_classes, is_meta_changed: bool
+):
     # @sly.timeit
     def _save_to_json(res, dst_path):
         json_data = ujson.dumps(res)
@@ -505,23 +507,13 @@ def sew_chunks_to_json(stats: List[BaseStats], project_fs_dir, updated_classes):
             f.write(json_bytes)
 
     for stat in stats:
-        # sly.logger.info(f"### {stat.basename_stem}")
-        # tm = sly.TinyTimer()
-        stat.sew_chunks(
-            chunks_dir=f"{project_fs_dir}/{stat.basename_stem}/",
-            updated_classes=updated_classes,
-        )
-        # sly.logger.info(f"chunks_sewed: {tm.get_sec()}")
+        stat.sew_chunks(chunks_dir=f"{project_fs_dir}/{stat.basename_stem}/")
         if sly.is_development():
             stat.to_image(f"{project_fs_dir}/{stat.basename_stem}.png", version2=True)
 
-        # tm = sly.TinyTimer()
         res = stat.to_json2()
-        # sly.logger.info(f"json_received: {tm.get_sec()}")
         if res is not None:
-            # tm = sly.TinyTimer()
             _save_to_json(res, f"{project_fs_dir}/{stat.basename_stem}.json")
-            # sly.logger.info(f"json_saved: {tm.get_sec()}")
 
 
 def _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs: List[FigureInfo]):
@@ -583,6 +575,7 @@ def archive_chunks_and_upload(
     stats: List[BaseStats],
     tf_project_dir,
     project_fs_dir,
+    datasets,
 ):
     def _compress_folders(folders, archive_path) -> int:
         with tarfile.open(archive_path, "w:gz") as tar:
@@ -606,6 +599,7 @@ def archive_chunks_and_upload(
     ) as pbar:
         g.api.file.upload(team.id, src_path, dst_path, progress_cb=pbar)
 
+    remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     sly.logger.info(f"The '{archive_name}' file was succesfully uploaded.")
 
 
@@ -671,3 +665,23 @@ def handle_broken_project_meta(json_project_meta: dict) -> dict:
                     data["color"] = "#" + data["color"]
 
     return json_project_meta
+
+
+def compare_metas(
+    project_meta: ProjectMeta, _project_meta_cached: Union[ProjectMeta, dict]
+) -> bool:
+    if _project_meta_cached is None:
+        return False
+    for tag_meta in project_meta.tag_metas:
+        if tag_meta not in _project_meta_cached.tag_metas:
+            return True
+    for tag_meta in _project_meta_cached.tag_metas:
+        if tag_meta not in project_meta.tag_metas:
+            return True
+    for class_meta in project_meta.obj_classes:
+        if class_meta not in _project_meta_cached.obj_classes:
+            return True
+    for class_meta in _project_meta_cached.obj_classes:
+        if class_meta not in project_meta.obj_classes:
+            return True
+    return False
