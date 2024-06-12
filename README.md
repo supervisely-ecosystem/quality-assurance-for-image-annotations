@@ -9,27 +9,34 @@
   <a href="#How-To-Run">How To Run</a>
 </p>
 
-[![](https://img.shields.io/badge/supervisely-ecosystem-brightgreen)](https://ecosystem.supervise.ly/apps/supervisely-ecosystem/PLACEHOLDER-FOR-APP-PATH)
+[![](https://img.shields.io/badge/supervisely-ecosystem-brightgreen)](https://ecosystem.supervise.ly/apps/supervisely-ecosystem/quality-assurance-for-image-annotations)
 [![](https://img.shields.io/badge/slack-chat-green.svg?logo=slack)](https://supervise.ly/slack)
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/supervisely-ecosystem/PLACEHOLDER-FOR-APP-PATH)
-[![views](https://app.supervise.ly/img/badges/views/supervisely-ecosystem/PLACEHOLDER-FOR-APP-PATH.png)](https://supervise.ly)
-[![runs](https://app.supervise.ly/img/badges/runs/supervisely-ecosystem/PLACEHOLDER-FOR-APP-PATH.png)](https://supervise.ly)
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/supervisely-ecosystem/quality-assurance-for-image-annotations)
+[![views](https://app.supervise.ly/img/badges/views/supervisely-ecosystem/quality-assurance-for-image-annotations.png)](https://supervise.ly)
+[![runs](https://app.supervise.ly/img/badges/runs/supervisely-ecosystem/quality-assurance-for-image-annotations.png)](https://supervise.ly)
 
 </div>
 
 ## Overview
 
-The app is claimed to unleash the full power of the [DatasetNinja.com](https://datasetninja.com) platform, allowing on-the-fly update of project statistics. It is equipped with efficient features that enable rapid and reliable statistical calculations for images with updated or added annotations. Consider it like a library cabinet filled with boxes, each containing individual elements. When you need to recalculate statistics, it's as straightforward as computing the elements within a specific box. This approach allows for a focused update, seamlessly integrating the new or modified data chunk with the existing information.
+The app is claimed to unleash the full power of the [DatasetNinja.com](https://datasetninja.com) platform, allowing on-the-fly updates of project statistics. It is equipped with efficient features that enable rapid and reliable statistical calculations for images with updated or added annotations. Consider it like a library cabinet filled with boxes, each containing individual elements. When you need to recalculate statistics, it's as straightforward as computing the elements within a specific box. This approach allows for a focused update, seamlessly integrating the new or modified data chunk with the existing information without recalculating data.
 
 ## How To Run
 
-For the project you wish to obtain the statistics, do the following steps:
+The application is designed to run as a service, which allows it to receive requests from the `Statistics` tab in the project's settings after its initial start. Ensuring the application operates in the background is important to handle the statistics.
 
-**Step 1:** Click on the three-dot menu in the project card.<br><br>
+To run the app, do the following steps:
 
-**Step 2:** Choose `Reports & Stats -> On-the-fly Quality Assurance for Image Annotations`.<br><br>
+**Step 1:** Open the homepage of `On-the-Fly Quality Assurance` app in the supervisely ecosystem.<br><br>
 
-**Step 3:** Wait while full stastics will be initially calculated. If it was already calculated, wait for the statstics update. (Promise - it won't take long 😊)
+**Step 2:** Run the application (*Note to admins*: It should be run as `admin` user, `Restart Policy` -> `On Error`).<br><br>
+
+**Step 3:** After the successful start, choose the selected project and trigger the calculation of statistics by opening the `Statistics` app. (Promise - it won't take long 😊)
+
+*Note to admins:* To run the application across different users, it needs to be shared. To enable the feature, refer to the `Apps` sessions tab.
+
+![image](https://github.com/supervisely-ecosystem/quality-assurance-for-image-annotations/assets/78355358/8c9bb566-3445-4fff-9a31-bfee2c4c60b9)
+
 
 The calculated statistics will appear in the `stats` folder in team files.
 
