@@ -259,6 +259,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         project_fs_dir,
         idx_to_infos,
         infos_to_idx,
+        project_stats,
     )
     sly.logger.info("Stats calculation finished.")
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)

@@ -425,11 +425,12 @@ def calculate_stats_and_save_chunks(
     project_fs_dir,
     chunk_to_images,
     image_to_chunk,
+    project_stats: dict,
 ) -> Dict[int, Set[ImageInfo]]:
-    # heatmaps_figure_ids = defaultdict(list)
     heatmaps_image_ids = defaultdict(set)
     heatmaps_figure_ids = defaultdict(set)
     total_updated = sum(len(lst) for lst in updated_images.values())
+    total_updated_figures = sum(x.labels_count for lst in updated_images.values() for x in lst)
     sly.logger.info(f"Start calculating stats for {total_updated} images.")
     with tqdm(desc="Calculating stats", total=total_updated) as pbar:
 
@@ -446,7 +447,13 @@ def calculate_stats_and_save_chunks(
                         figs = figures.get(image.id, [])
                         for stat in stats:
                             stat.update2(image, figs)
-                        _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs)
+                        _update_heatmaps_sample(
+                            heatmaps_figure_ids,
+                            heatmaps_image_ids,
+                            figs,
+                            total_updated_figures,
+                            project_stats["objects"]["total"]["objectsInDataset"],
+                        )
 
                     pbar.update(len(batch_infos))
 
@@ -516,9 +523,19 @@ def sew_chunks_to_json(
             _save_to_json(res, f"{project_fs_dir}/{stat.basename_stem}.json")
 
 
-def _update_heatmaps_sample(heatmaps_figure_ids, heatmaps_image_ids, figs: List[FigureInfo]):
+def _update_heatmaps_sample(
+    heatmaps_figure_ids,
+    heatmaps_image_ids,
+    figs: List[FigureInfo],
+    total_updated_figures: int,
+    total_project_figures: int,
+):
+    threshold = 1
+    if total_updated_figures / total_project_figures > 0.3:
+        threshold = 60 / total_project_figures
+
     for fig in figs:
-        if len(heatmaps_figure_ids.get(fig.class_id, [])) < 50:
+        if random.random() < threshold:
             heatmaps_figure_ids[fig.class_id].add(fig.id)
             heatmaps_image_ids[fig.dataset_id].add(fig.entity_id)
 
