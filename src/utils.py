@@ -426,6 +426,7 @@ def calculate_stats_and_save_chunks(
     chunk_to_images,
     image_to_chunk,
     project_stats: dict,
+    project,
 ) -> Dict[int, Set[ImageInfo]]:
     heatmaps_image_ids = defaultdict(set)
     heatmaps_figure_ids = defaultdict(set)
@@ -453,6 +454,7 @@ def calculate_stats_and_save_chunks(
                             figs,
                             total_updated_figures,
                             project_stats["objects"]["total"]["objectsInDataset"],
+                            project.size,
                         )
 
                     pbar.update(len(batch_infos))
@@ -529,9 +531,10 @@ def _update_heatmaps_sample(
     figs: List[FigureInfo],
     total_updated_figures: int,
     total_project_figures: int,
+    project_size: str,
 ):
     threshold = 1
-    if total_updated_figures / total_project_figures > 0.3:
+    if total_updated_figures / total_project_figures > 0.3 and int(project_size) > 10e9:
         threshold = 60 / total_project_figures
 
     for fig in figs:
