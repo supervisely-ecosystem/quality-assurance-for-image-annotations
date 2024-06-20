@@ -26,15 +26,14 @@ MINIMUM_DTOOLS_VERSION: str = (
 )
 HEALTHCHECK_PROJECT_ID = 10387
 
-_INFO = LOGGING_LEVELS["INFO"].int
-_DEBUG = LOGGING_LEVELS["DEBUG"].int
-_WARNING = LOGGING_LEVELS["WARN"].int
-
 
 def _initialize_log_levels(project_id):
     global _INFO
-    # global _DEBUG
+    global _DEBUG
     global _WARNING
+    _INFO = LOGGING_LEVELS["INFO"].int
+    _DEBUG = LOGGING_LEVELS["DEBUG"].int
+    _WARNING = LOGGING_LEVELS["WARN"].int
     if project_id == HEALTHCHECK_PROJECT_ID:
         _INFO = LOGGING_LEVELS["DEBUG"].int
         _WARNING = LOGGING_LEVELS["DEBUG"].int
