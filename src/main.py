@@ -102,7 +102,7 @@ def _remove_old_active_project_request(now, team, file):
 
 def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
 
-    g._initialize_log_levels(project.id)
+    # g._initialize_log_levels(project.id)
     sly.logger.log(g._INFO, "Checking requests...")
 
     active_project_path_local = f"{g.ACTIVE_REQUESTS_DIR}/{project.id}"
