@@ -35,7 +35,7 @@ def pull_cache(
     _cache = {}
 
     if not g.api.file.dir_exists(team_id, tf_project_dir):
-        sly.logger.warning("The project directory not exists in team files.")
+        sly.logger.log(g._WARNING, "The project directory not exists in team files.")
         return True, _cache
 
     filename = f"{project_id}_cache.json"
@@ -46,7 +46,7 @@ def pull_cache(
     if g.api.file.exists(team_id, tf_cache_path):
         g.api.file.download(team_id, tf_cache_path, local_cache_path)
     else:
-        sly.logger.warning(f"The {filename!r} not exists in team files.")
+        sly.logger.log(g._WARNING, f"The {filename!r} not exists in team files.")
         return True, _cache
 
     if os.path.exists(local_cache_path):
@@ -58,25 +58,27 @@ def pull_cache(
     smeta = _cache.get("stats_meta")
 
     if images is None:
-        sly.logger.info(
-            f"The key with project ID={project_id} was not found in 'images_cache.json'. Stats will be fully recalculated."
+        sly.logger.log(
+            g._INFO,
+            f"The key with project ID={project_id} was not found in 'images_cache.json'. Stats will be fully recalculated.",
         )
         return True, _cache
 
     if meta is None:
-        sly.logger.info(
-            f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated."
+        sly.logger.log(
+            g._INFO,
+            f"The key with project ID={project_id} was not found in 'meta_cache.json'. Stats will be fully recalculated.",
         )
         return True, _cache
 
     if smeta.get("chunk_size", -1) != g.CHUNK_SIZE:
-        sly.logger.warning("The chunk size has changed. Recalculating full stats...")
+        sly.logger.log(g._WARNING, "The chunk size has changed. Recalculating full stats...")
         return True, _cache
 
     chunks_dt = smeta.get("chunks_dt")
     if chunks_dt is None:
-        sly.logger.warning(
-            "The cache has no chunks datetime to verify. Recalculating full stats..."
+        sly.logger.log(
+            g._WARNING, "The cache has no chunks datetime to verify. Recalculating full stats..."
         )
         return True, _cache
     else:
@@ -84,18 +86,20 @@ def pull_cache(
 
     dtools_version = smeta.get("dataset-tools")
     if dtools_version is None:
-        sly.logger.warning(
-            "The cache has no 'dataset-tools' version to verify. Recalculating full stats..."
+        sly.logger.log(
+            g._WARNING,
+            "The cache has no 'dataset-tools' version to verify. Recalculating full stats...",
         )
         return True, _cache
     else:
         if Version(dtools_version) < Version(g.MINIMUM_DTOOLS_VERSION):
-            sly.logger.warning(
-                f"The cached version ({dtools_version}) of 'dataset-tools' package is less than the required one ({g.MINIMUM_DTOOLS_VERSION}). Force statistics recalculation."
+            sly.logger.log(
+                g._WARNING,
+                f"The cached version ({dtools_version}) of 'dataset-tools' package is less than the required one ({g.MINIMUM_DTOOLS_VERSION}). Force statistics recalculation.",
             )
             return True, _cache
 
-    sly.logger.info(f"The cache file {filename!r} was pulled from team files")
+    sly.logger.log(g._INFO, f"The cache file {filename!r} was pulled from team files")
 
     _cache["stats_meta"] = smeta
     _cache["meta"] = meta
@@ -147,7 +151,7 @@ def push_cache(
         json.dump(_cache, f)
 
     g.api.file.upload(team_id, local_cache_path, tf_cache_path)
-    sly.logger.info(f"The cache file {filename!r} was pushed to team files")
+    sly.logger.log(g._INFO, f"The cache file {filename!r} was pushed to team files")
 
     # remove old junk
     g.api.file.remove_dir(team_id, f"{os.path.dirname(tf_project_dir)}/_cache/", silent=True)
@@ -176,7 +180,7 @@ def get_updated_images_and_classes(
 
     updated_images, updated_classes = {d.id: [] for d in datasets}, {}
     if len(project_meta.obj_classes.items()) == 0:
-        sly.logger.info("The project is fully unlabeled")
+        sly.logger.log(g._INFO, "The project is fully unlabeled")
         return {}, {}, {}, is_meta_changed
 
     images_all_flat = []
@@ -210,8 +214,9 @@ def get_updated_images_and_classes(
             for dct in [cached, actual]:
                 updated_classes.update(dict(filter(_func, dct.items())))
 
-            sly.logger.info(
-                f"Changes in the number of classes detected: {list(updated_classes.values())}"
+            sly.logger.log(
+                g._INFO,
+                f"Changes in the number of classes detected: {list(updated_classes.values())}",
             )
 
     set_A, set_B = set(_images_cached), set([i.id for i in images_all_flat])
@@ -227,18 +232,22 @@ def get_updated_images_and_classes(
 
     if set_A != set_B:
         if set_A.issubset(set_B):
-            sly.logger.warning(f"The images with the following ids were added: {set_B - set_A}")
+            sly.logger.log(
+                g._INFO, f"The images with the following ids were added: {set_B - set_A}"
+            )
         elif set_B.issubset(set_A):
-            sly.logger.warning(f"The images with the following ids were deleted: {set_A - set_B}")
+            sly.logger.log(
+                g._INFO, f"The images with the following ids were deleted: {set_A - set_B}"
+            )
 
-        sly.logger.info("Recalculate full statistics")
+        sly.logger.log(g._INFO, "Recalculate full statistics")
         return images_all_dct, {}, _cache, is_meta_changed
 
     num_updated = sum(len(lst) for lst in updated_images.values())
     if num_updated == project.items_count:
-        sly.logger.info(f"Full dataset statistics will be calculated.")
+        sly.logger.log(g._INFO, f"Full dataset statistics will be calculated.")
     elif num_updated > 0:
-        sly.logger.info(f"The changes in {num_updated} images detected")
+        sly.logger.log(g._INFO, f"The changes in {num_updated} images detected")
 
     return updated_images, updated_classes, _cache, is_meta_changed
 
@@ -277,11 +286,12 @@ def check_idxs_integrity(
         return images_all_dct
 
     if sly.fs.dir_empty(projectfs_dir):
-        sly.logger.warning("The buffer is empty. Calculate full stats")
+        sly.logger.log(g._WARNING, "The buffer is empty. Calculate full stats")
         if any(len(x) != d.items_count for x, d in zip(updated_images.values(), datasets)):
             total_updated = sum(len(lst) for lst in updated_images.values())
-            sly.logger.warning(
-                f"The number of updated images ({total_updated}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation..."
+            sly.logger.log(
+                g._WARNING,
+                f"The number of updated images ({total_updated}) should equal to the number of images ({project.items_count}) in the project. Possibly the problem with cached files. Forcing recalculation...",
             )
             return images_all_dct
     else:
@@ -294,10 +304,10 @@ def check_idxs_integrity(
 
                 if len(files) != len(idx_to_infos.keys()):
                     msg = f"The number of images in the project has changed. Check chunks in Team Files: {projectfs_dir}/{stat.basename_stem}. Forcing recalculation..."
-                    sly.logger.warning(msg)
+                    sly.logger.log(g._WARNING, msg)
                     return images_all_dct
         except:
-            sly.logger.warning("Error while integrity checking. Recalc full stats.")
+            sly.logger.log(g._WARNING, "Error while integrity checking. Recalc full stats.")
             return images_all_dct
 
     return updated_images
@@ -314,7 +324,7 @@ def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
             raise ValueError(
                 f"The number of chunks per stat ({len(npy_paths)}) not match with the total items count of the project ({project_info.items_count}) using following batch size: {g.CHUNK_SIZE}. Details: DATASET_ID={dataset.id}; actual num of chunks: {actual_ceil}; max num of chunks: {max_chunks}"
             )
-    sly.logger.info("The consistency of data is OK")
+    sly.logger.log(g._INFO, "The consistency of data is OK")
 
 
 @sly.timeit
@@ -346,8 +356,9 @@ def remove_junk(team_id, tf_project_dir, project, datasets, project_fs_dir):
             rm_cnt += 1
 
     if rm_cnt > 0:
-        sly.logger.info(
-            f"The {rm_cnt} old or junk chunk files were detected and removed from the buffer"
+        sly.logger.log(
+            g._INFO,
+            f"The {rm_cnt} old or junk chunk files were detected and removed from the buffer",
         )
 
     chunks_archive = [
@@ -358,8 +369,9 @@ def remove_junk(team_id, tf_project_dir, project, datasets, project_fs_dir):
             tf_chunks_dt = ".".join(sly.fs.get_file_name(chunks).split(".")[:-1]).split("_")[-1]
             if tf_chunks_dt != g.CHUNKS_LATEST_DATETIME.isoformat():
                 g.api.file.remove_file(team_id, chunks)
-                sly.logger.info(
-                    f"The {chunks} old or junk chunks archive was detected and removed from the team files."
+                sly.logger.log(
+                    g._INFO,
+                    f"The {chunks} old or junk chunks archive was detected and removed from the team files.",
                 )
 
 
@@ -375,8 +387,9 @@ def download_stats_chunks_to_buffer(
         return True
 
     if g.CHUNKS_LATEST_DATETIME is None:
-        sly.logger.warning(
-            "The chunks identifier of latest datetime is not existed.  Recalculating full stats."
+        sly.logger.log(
+            g._WARNING,
+            "The chunks identifier of latest datetime is not existed.  Recalculating full stats.",
         )
         return True
     cached_chunks_dt = g.CHUNKS_LATEST_DATETIME.isoformat()
@@ -386,14 +399,16 @@ def download_stats_chunks_to_buffer(
 
     file = g.api.file.get_info_by_path(team_id, src_path)
     if file is None:
-        sly.logger.warning(
-            f"The chunks archive file is not existed: '{archive_name}'.  Recalculating full stats."
+        sly.logger.log(
+            g._WARNING,
+            f"The chunks archive file is not existed: '{archive_name}'.  Recalculating full stats.",
         )
         return True
     tf_chunks_dt = ".".join(sly.fs.get_file_name(file.path).split(".")[:-1]).split("_")[-1]
     if cached_chunks_dt != tf_chunks_dt:
-        sly.logger.warning(
-            f"The chunks datetime '{tf_chunks_dt}' differs from the cached one: '{cached_chunks_dt}'.  Recalculating full stats."
+        sly.logger.log(
+            g._WARNING,
+            f"The chunks datetime '{tf_chunks_dt}' differs from the cached one: '{cached_chunks_dt}'.  Recalculating full stats.",
         )
         return True
 
@@ -406,8 +421,8 @@ def download_stats_chunks_to_buffer(
         try:
             g.api.file.download(team_id, src_path, dst_path, progress_cb=pbar)
         except:
-            sly.logger.warning(
-                "The integrity of the team files is broken. Recalculating full stats."
+            sly.logger.log(
+                g._WARNING, "The integrity of the team files is broken. Recalculating full stats."
             )
             return True
 
@@ -432,7 +447,7 @@ def calculate_stats_and_save_chunks(
     heatmaps_figure_ids = defaultdict(set)
     total_updated = sum(len(lst) for lst in updated_images.values())
     total_updated_figures = sum(x.labels_count for lst in updated_images.values() for x in lst)
-    sly.logger.info(f"Start calculating stats for {total_updated} images.")
+    sly.logger.log(g._INFO, f"Start calculating stats for {total_updated} images.")
     with tqdm(desc="Calculating stats", total=total_updated) as pbar:
 
         for dataset_id, images in updated_images.items():
@@ -578,7 +593,7 @@ def calculate_and_upload_heatmaps(
     heatmaps.to_image(fs_heatmap_path)
 
     g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
-    sly.logger.info(f"The {heatmaps_name!r} file was succesfully uploaded.")
+    sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
     add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
 
 
@@ -622,7 +637,7 @@ def archive_chunks_and_upload(
         g.api.file.upload(team.id, src_path, dst_path, progress_cb=pbar)
 
     remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
-    sly.logger.info(f"The '{archive_name}' file was succesfully uploaded.")
+    sly.logger.log(g._INFO, f"The '{archive_name}' file was succesfully uploaded.")
 
 
 @sly.timeit
@@ -644,8 +659,8 @@ def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
         except:
             pass
 
-    sly.logger.info(
-        f"{len(stats_paths)} updated .json and .png stats succesfully updated and uploaded"
+    sly.logger.log(
+        g._INFO, f"{len(stats_paths)} updated .json and .png stats succesfully updated and uploaded"
     )
 
 

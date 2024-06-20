@@ -1,6 +1,6 @@
 import os
 import json
-
+import logging
 from collections import defaultdict
 import src.globals as g
 import src.utils as u
@@ -102,7 +102,8 @@ def _remove_old_active_project_request(now, team, file):
 
 def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
 
-    sly.logger.debug("Checking requests...")
+    g._initialize_log_levels(project.id)
+    sly.logger.log(g._INFO, "Checking requests...")
 
     active_project_path_local = f"{g.ACTIVE_REQUESTS_DIR}/{project.id}"
     active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project.id}"
@@ -113,7 +114,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         _remove_old_active_project_request(now, team, file)
         if g.api.file.exists(team.id, file.path) is True:
             msg = f"Request for the project with ID={project.id} is busy. Wait until the previous one will be finished..."
-            sly.logger.info(msg)
+            sly.logger.log(g._INFO, msg)
             while True:
                 if g.api.file.exists(team.id, active_project_path_tf):
                     now = datetime.now(timezone.utc)
@@ -128,7 +129,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         pass
     g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
 
-    sly.logger.info("Start Quality Assurance.")
+    sly.logger.log(g._INFO, "Start Quality Assurance.")
 
     tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
     project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
@@ -145,13 +146,15 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     datasets = g.api.dataset.get_list(project.id)
     project_stats = g.api.project.get_stats(project.id)
 
-    sly.logger.info(f"Processing for the '{project.name}' project")
-    sly.logger.info(
-        f"with the USER_ID={user_id} TEAM_ID={team.id} WORKSPACE_ID={workspace.id} PROJECT_ID={project.id}"
+    sly.logger.log(g._INFO, f"Processing for the '{project.name}' project")
+    sly.logger.log(
+        g._INFO,
+        f"with the USER_ID={user_id} TEAM_ID={team.id} WORKSPACE_ID={workspace.id} PROJECT_ID={project.id}",
     )
-    sly.logger.info(f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
-    sly.logger.info(
-        f"The project consists of {project.items_count} images and has {project.datasets_count} datasets"
+    sly.logger.log(g._INFO, f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
+    sly.logger.log(
+        g._INFO,
+        f"The project consists of {project.items_count} images and has {project.datasets_count} datasets",
     )
 
     stats = [
@@ -197,20 +200,23 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
             if isinstance(stat, mandatory_class_stats):
                 if not g.api.file.exists(team.id, path):
                     force_stats_recalc = True
-                    sly.logger.warning(
-                        f"The calcuated stat {stat.basename_stem!r} not exists. Forcing full stats recalculation..."
+                    sly.logger.log(
+                        g._WARNING,
+                        f"The calcuated stat {stat.basename_stem!r} not exists. Forcing full stats recalculation...",
                     )
             if isinstance(stat, optional_tag_stats):
                 if g.api.file.exists(team.id, path) and u.applicability_test(stat) is False:
                     g.api.file.remove_file(team.id, path)
-                    sly.logger.info(
-                        f"The applicability of tag stat {stat.basename_stem!r} has been changed. Deleting the old stat from team files."
+                    sly.logger.log(
+                        g._INFO,
+                        f"The applicability of tag stat {stat.basename_stem!r} has been changed. Deleting the old stat from team files.",
                     )
 
         if not g.api.file.exists(team.id, f"{tf_project_dir}/{heatmaps.basename_stem}.png"):
             force_stats_recalc = True
-            sly.logger.warning(
-                f"The calcuated stat {heatmaps.basename_stem!r} not exists. Forcing full stats recalculation..."
+            sly.logger.log(
+                g._WARNING,
+                f"The calcuated stat {heatmaps.basename_stem!r} not exists. Forcing full stats recalculation...",
             )
 
     images_all_dct = u.get_project_images_all(datasets)
@@ -219,7 +225,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     )
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0 and not is_meta_changed:
-        sly.logger.info("Nothing to update. Skipping stats calculation...")
+        sly.logger.log(g._INFO, "Nothing to update. Skipping stats calculation...")
         g.api.file.remove(team.id, active_project_path_tf)
         u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
@@ -262,11 +268,11 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         project_stats,
         project,
     )
-    sly.logger.info("Stats calculation finished.")
+    sly.logger.log(g._INFO, "Stats calculation finished.")
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes, is_meta_changed)
 
-    sly.logger.debug("Start threading of 'calculate_and_save_heatmaps'")
+    sly.logger.log(g._INFO, "Start threading of 'calculate_and_save_heatmaps'")
     thread1 = threading.Thread(
         target=u.calculate_and_upload_heatmaps,
         args=(
@@ -280,7 +286,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     )
     thread1.start()
 
-    sly.logger.debug("Start threading of 'archive_chunks_and_upload'")
+    sly.logger.log(g._INFO, "Start threading of 'archive_chunks_and_upload'")
     thread2 = threading.Thread(
         target=u.archive_chunks_and_upload,
         args=(team, project, stats, tf_project_dir, project_fs_dir, datasets),

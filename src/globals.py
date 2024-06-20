@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 import supervisely as sly
+from supervisely.sly_logger import LOGGING_LEVELS
+
 
 if sly.is_development():
     load_dotenv("local.env")
@@ -22,3 +24,17 @@ CHUNK_SIZE: int = 1000
 MINIMUM_DTOOLS_VERSION: str = (
     "0.0.90"  # force stats to fully recalculate (f.e. when edit statistics)
 )
+HEALTHCHECK_PROJECT_ID = 10387
+
+_INFO = LOGGING_LEVELS["INFO"].int
+_DEBUG = LOGGING_LEVELS["DEBUG"].int
+_WARNING = LOGGING_LEVELS["WARN"].int
+
+
+def _initialize_log_levels(project_id):
+    global _INFO
+    # global _DEBUG
+    global _WARNING
+    if project_id == HEALTHCHECK_PROJECT_ID:
+        _INFO = LOGGING_LEVELS["DEBUG"].int
+        _WARNING = LOGGING_LEVELS["DEBUG"].int
