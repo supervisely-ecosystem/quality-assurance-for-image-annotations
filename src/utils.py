@@ -533,6 +533,8 @@ def _update_heatmaps_sample(
     total_project_figures: int,
     project_size: str,
 ):
+    if total_project_figures == 0:
+        return
     threshold = 1
     if total_updated_figures / total_project_figures > 0.3 and int(project_size) > 10e9:
         threshold = 60 / total_project_figures
