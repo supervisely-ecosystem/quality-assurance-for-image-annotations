@@ -4,6 +4,9 @@
   "name": "On-the-Fly Quality Assurance",
   "description": "Get instant DatasetNinja statistics for your project",
   "categories": ["system"],
+  "session_tags": [
+    "scalable"
+  ],
   "icon": "https://user-images.githubusercontent.com/12828725/182186256-5ee663ad-25c7-4a62-9af1-fbfdca715b57.png",
   "icon_cover": true,
   "poster": "https://user-images.githubusercontent.com/12828725/182181033-d0d1a690-8388-472e-8862-e0cacbd4f082.png",
