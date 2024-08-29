@@ -3,3 +3,4 @@ humanize
 ujson
 scikit-image==0.21.0
 # git+https://github.com/supervisely/supervisely.git@figures_download_all_pages
+Pillow==9.5.0
