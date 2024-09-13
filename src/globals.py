@@ -22,7 +22,7 @@ TF_ACTIVE_REQUESTS_DIR = f"{TF_STATS_DIR}/_active_requests"
 
 CHUNK_SIZE: int = 1000
 MINIMUM_DTOOLS_VERSION: str = (
-    "0.0.92"  # force stats to fully recalculate (f.e. when edit statistics)
+    "0.1.0"  # force stats to fully recalculate (f.e. when edit statistics)
 )
 HEALTHCHECK_PROJECT_ID = 10387
 
