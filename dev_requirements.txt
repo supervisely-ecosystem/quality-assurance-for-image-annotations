@@ -1,3 +1,4 @@
+# deprecated. Use Dockerfile to install dependencies on prod
 dataset-tools==0.1.0
 humanize
 ujson
