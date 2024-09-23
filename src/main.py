@@ -100,9 +100,8 @@ def _remove_old_active_project_request(now, team, file):
         )
 
 
-def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
+def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo):
 
-    g._initialize_log_levels(project.id)
     sly.logger.log(g._INFO, "Checking requests...")
 
     active_project_path_local = f"{g.ACTIVE_REQUESTS_DIR}/{project.id}"
@@ -127,7 +126,19 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     # Path(active_project_path_local).touch()
     with open(active_project_path_local, "w") as file:
         pass
-    g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
+    try:
+        g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
+    except:
+        pass
+
+    sly.logger.log(g._INFO, "Finish checking if 'QA & Stats' tab is active.")
+
+
+def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
+
+    g.initialize_log_levels(project.id)
+
+    check_if_QA_tab_is_active(team, project)
 
     sly.logger.log(g._INFO, "Start Quality Assurance.")
 

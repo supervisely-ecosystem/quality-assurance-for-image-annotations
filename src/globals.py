@@ -27,7 +27,7 @@ MINIMUM_DTOOLS_VERSION: str = (
 HEALTHCHECK_PROJECT_ID = 10387
 
 
-def _initialize_log_levels(project_id):
+def initialize_log_levels(project_id):
     global _INFO
     global _DEBUG
     global _WARNING
