@@ -601,7 +601,9 @@ def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
     status_path = f"{project_fs_dir}/_cache/heatmaps/status_ok"
     tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
     os.makedirs(f"{project_fs_dir}/_cache/heatmaps", exist_ok=True)
-    Path(status_path).touch()
+    # Path(status_path).touch()
+    with open(status_path, "w") as file:
+        pass
     g.api.file.upload(team.id, status_path, tf_status_path)
 
 

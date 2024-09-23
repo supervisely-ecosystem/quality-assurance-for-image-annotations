@@ -100,7 +100,7 @@ def _remove_old_active_project_request(now, team, file):
         )
 
 
-def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo):
+def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
 
     sly.logger.log(g._INFO, "Checking requests...")
 
@@ -132,13 +132,14 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo):
         pass
 
     sly.logger.log(g._INFO, "Finish checking if 'QA & Stats' tab is active.")
+    return active_project_path_tf
 
 
 def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
 
     g.initialize_log_levels(project.id)
 
-    check_if_QA_tab_is_active(team, project)
+    active_project_path_tf = check_if_QA_tab_is_active(team, project)
 
     sly.logger.log(g._INFO, "Start Quality Assurance.")
 
