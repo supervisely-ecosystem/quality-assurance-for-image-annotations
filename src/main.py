@@ -242,10 +242,13 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
-    if (
-        g.api.file.dir_exists(team.id, tf_project_dir) is True
-        and total_updated < project.items_count
-    ):
+    if getattr(project, "items_count", None) is None:
+        force_stats_recalc = True
+        is_updated_images_count_valid = True
+    else:
+        is_updated_images_count_valid = total_updated < project.items_count
+
+    if g.api.file.dir_exists(team.id, tf_project_dir) is True and is_updated_images_count_valid:
         force_stats_recalc = u.download_stats_chunks_to_buffer(
             team.id, project, tf_project_dir, project_fs_dir, force_stats_recalc
         )

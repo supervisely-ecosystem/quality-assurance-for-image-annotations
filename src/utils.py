@@ -244,7 +244,7 @@ def get_updated_images_and_classes(
         return images_all_dct, {}, _cache, is_meta_changed
 
     num_updated = sum(len(lst) for lst in updated_images.values())
-    if num_updated == project.items_count:
+    if num_updated == getattr(project, "items_count", 0):
         sly.logger.log(g._INFO, f"Full dataset statistics will be calculated.")
     elif num_updated > 0:
         sly.logger.log(g._INFO, f"The changes in {num_updated} images detected")
@@ -273,7 +273,7 @@ def get_indexes_dct(
 
 @sly.timeit
 def check_idxs_integrity(
-    project,
+    project: ProjectInfo,
     datasets,
     stats,
     projectfs_dir,
