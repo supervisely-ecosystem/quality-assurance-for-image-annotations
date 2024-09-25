@@ -3,5 +3,5 @@ dataset-tools==0.1.0
 humanize
 ujson
 scikit-image==0.21.0
-# git+https://github.com/supervisely/supervisely.git@figures_download_all_pages
+git+https://github.com/supervisely/supervisely.git@fix_tqdm_multiple_requests
 Pillow==9.5.0

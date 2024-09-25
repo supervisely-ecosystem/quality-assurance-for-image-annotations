@@ -481,8 +481,8 @@ def calculate_stats_and_save_chunks(
                     save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime)
                     stat.clean()
 
-        if pbar.last_print_n < pbar.total:  # unlabeled images
-            pbar.update(pbar.total - pbar.n)
+        # if pbar.last_print_n < pbar.total:  # unlabeled images
+        #     pbar.update(pbar.total - pbar.n)
 
     return heatmaps_image_ids, heatmaps_figure_ids
 

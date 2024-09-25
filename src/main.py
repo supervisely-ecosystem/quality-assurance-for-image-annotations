@@ -30,6 +30,8 @@ app = sly.Application(layout=layout, static_dir=static_dir)
 # app = sly.Application()
 server = app.get_server()
 
+os.environ["ENV"] = "production"
+
 
 TIMELOCK_LIMIT = 60  # seconds
 
