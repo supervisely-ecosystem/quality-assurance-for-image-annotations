@@ -238,7 +238,8 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0 and not is_meta_changed:
         sly.logger.log(g._INFO, "Nothing to update. Skipping stats calculation...")
-        g.api.file.remove(team.id, active_project_path_tf)
+        if isinstance(active_project_path_tf, str):
+            g.api.file.remove(team.id, active_project_path_tf)
         u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
 
