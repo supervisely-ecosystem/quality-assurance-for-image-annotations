@@ -312,7 +312,8 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project.id, tf_project_dir, project_fs_dir, _cache)
     # sly.fs.silent_remove(active_project_path)
-    g.api.file.remove(team.id, active_project_path_tf)
+    if isinstance(active_project_path_tf, str):
+        g.api.file.remove(team.id, active_project_path_tf)
     return JSONResponse(
         {"message": f"The statistics were updated: {total_updated} images were calculated"}
     )
