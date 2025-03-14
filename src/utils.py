@@ -604,7 +604,10 @@ def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
     # Path(status_path).touch()
     with open(status_path, "w") as file:
         pass
-    g.api.file.upload(team.id, status_path, tf_status_path)
+    try:
+        g.api.file.upload(team.id, status_path, tf_status_path)
+    except IndexError:
+        pass
 
 
 @sly.timeit
