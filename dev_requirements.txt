@@ -1,7 +1,1 @@
-# deprecated. Use Dockerfile to install dependencies on prod
-dataset-tools==0.1.5
-humanize
-ujson
-scikit-image==0.21.0
-# git+https://github.com/supervisely/supervisely.git@figures_download_all_pages
-Pillow==9.5.0
+git+https://github.com/supervisely/dataset-tools.git@add-datasets-stat

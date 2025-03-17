@@ -173,6 +173,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         dtools.ClassBalance(project_meta, project_stats),
         dtools.ClassCooccurrence(project_meta),
         dtools.ClassesPerImage(project_meta, project_stats, datasets),
+        dtools.DatasetsAnnotations(project_meta, project_stats, datasets),
         dtools.ObjectsDistribution(project_meta),
         dtools.ObjectSizes(project_meta, project_stats),
         dtools.ClassSizes(project_meta),
