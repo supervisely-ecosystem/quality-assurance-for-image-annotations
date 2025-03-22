@@ -196,11 +196,11 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
             dtools.ClassBalance,
             dtools.ClassCooccurrence,
             dtools.ClassesPerImage,
+            dtools.DatasetsAnnotations,
             dtools.ObjectsDistribution,
             dtools.ObjectSizes,
             dtools.ClassSizes,
             dtools.ClassesTreemap,
-            dtools.DatasetsAnnotations,
         )
         optional_tag_stats = (
             dtools.TagsImagesCooccurrence,
