@@ -155,7 +155,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     except Exception:
         json_project_meta = u.handle_broken_project_meta(json_project_meta)
         project_meta = sly.ProjectMeta.from_json(json_project_meta)
-    datasets = g.api.dataset.get_list(project.id)
+    datasets = g.api.dataset.get_list(project.id, recursive=True)
     project_stats = g.api.project.get_stats(project.id)
 
     sly.logger.log(g._INFO, f"Processing for the '{project.name}' project")
@@ -173,6 +173,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         dtools.ClassBalance(project_meta, project_stats),
         dtools.ClassCooccurrence(project_meta),
         dtools.ClassesPerImage(project_meta, project_stats, datasets),
+        dtools.DatasetsAnnotations(project_meta, project_stats, datasets),
         dtools.ObjectsDistribution(project_meta),
         dtools.ObjectSizes(project_meta, project_stats),
         dtools.ClassSizes(project_meta),
@@ -195,6 +196,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
             dtools.ClassBalance,
             dtools.ClassCooccurrence,
             dtools.ClassesPerImage,
+            dtools.DatasetsAnnotations,
             dtools.ObjectsDistribution,
             dtools.ObjectSizes,
             dtools.ClassSizes,
@@ -214,7 +216,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                     force_stats_recalc = True
                     sly.logger.log(
                         g._WARNING,
-                        f"The calcuated stat {stat.basename_stem!r} not exists. Forcing full stats recalculation...",
+                        f"The calcuated stat {stat.basename_stem!r} does not exist. Forcing full stats recalculation...",
                     )
             if isinstance(stat, optional_tag_stats):
                 if g.api.file.exists(team.id, path) and u.applicability_test(stat) is False:

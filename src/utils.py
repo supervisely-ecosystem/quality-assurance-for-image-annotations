@@ -606,7 +606,6 @@ def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
         pass
     g.api.file.upload(team.id, status_path, tf_status_path)
 
-
 @sly.timeit
 def archive_chunks_and_upload(
     team: TeamInfo,
