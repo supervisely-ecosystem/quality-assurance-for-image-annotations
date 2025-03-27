@@ -573,6 +573,7 @@ def calculate_and_upload_heatmaps(
     heatmaps_image_ids: Dict[int, Set[int]],
     heatmaps_figure_ids: Dict[int, Set[int]],
 ):
+    sly.logger.log(g._INFO, f"Memory usage before calculating heatmaps: {get_memory_usage():.2f} MB")
     if len(heatmaps_image_ids) == 0:
         return
 
