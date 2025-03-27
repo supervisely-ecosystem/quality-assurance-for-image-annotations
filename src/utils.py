@@ -162,7 +162,10 @@ def push_cache(
 
 @sly.timeit
 def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
-    return {d.id: g.api.image.get_list(d.id) for d in datasets}
+    sly.logger.log(g._INFO, f"[MU] Memory usage before loading project images: {get_memory_usage():.2f} MB")
+    result = {d.id: g.api.image.get_list(d.id) for d in datasets}
+    sly.logger.log(g._INFO, f"[MU] Memory usage after loading project images: {get_memory_usage():.2f} MB")
+    return result
 
 
 @sly.timeit
@@ -449,6 +452,7 @@ def calculate_stats_and_save_chunks(
     project_stats: dict,
     project,
 ) -> Dict[int, Set[ImageInfo]]:
+    sly.logger.log(g._INFO, f"[MU] Memory usage before calculating stats: {get_memory_usage():.2f} MB")
     heatmaps_image_ids = defaultdict(set)
     heatmaps_figure_ids = defaultdict(set)
     total_updated = sum(len(lst) for lst in updated_images.values())
@@ -460,6 +464,7 @@ def calculate_stats_and_save_chunks(
             updated_chunks = list(set([image_to_chunk[image.id] for image in images]))
 
             for chunk in updated_chunks:
+                sly.logger.log(g._INFO, f"[MU] Memory usage before processing chunk: {get_memory_usage():.2f} MB")
                 images_chunk = chunk_to_images[chunk]
 
                 for batch_infos in sly.batched(images_chunk, 100):
@@ -479,7 +484,7 @@ def calculate_stats_and_save_chunks(
                         )
 
                     pbar.update(len(batch_infos))
-                    sly.logger.log(g._INFO, f"Memory usage after batch: {get_memory_usage():.2f} MB")
+                    sly.logger.log(g._INFO, f"[MU] Memory usage after batch: {get_memory_usage():.2f} MB")
 
                 latest_datetime = get_latest_datetime(images_chunk)
                 if g.CHUNKS_LATEST_DATETIME is None or g.CHUNKS_LATEST_DATETIME < latest_datetime:
@@ -487,8 +492,9 @@ def calculate_stats_and_save_chunks(
                 for stat in stats:
                     save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime)
                     stat.clean()
-                sly.logger.log(g._INFO, f"Memory usage after chunk: {get_memory_usage():.2f} MB")
+                sly.logger.log(g._INFO, f"[MU] Memory usage after chunk: {get_memory_usage():.2f} MB")
 
+    sly.logger.log(g._INFO, f"[MU] Memory usage after calculating stats: {get_memory_usage():.2f} MB")
     return heatmaps_image_ids, heatmaps_figure_ids
 
 
@@ -503,6 +509,7 @@ def get_latest_datetime(images_chunk):
 
 # @sly.timeit
 def save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime):
+    sly.logger.log(g._INFO, f"[MU] Memory usage before saving chunk: {get_memory_usage():.2f} MB")
     savedir = f"{project_fs_dir}/{stat.basename_stem}"
     os.makedirs(savedir, exist_ok=True)
 
@@ -522,17 +529,18 @@ def save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime):
         f"{savedir}/{chunk}_{g.CHUNK_SIZE}_{latest_datetime.isoformat()}.npy",
         stat.to_numpy_raw(),
     )
+    sly.logger.log(g._INFO, f"[MU] Memory usage after saving chunk: {get_memory_usage():.2f} MB")
 
 
 @sly.timeit
 def sew_chunks_to_json(
     stats: List[BaseStats], project_fs_dir, updated_classes, is_meta_changed: bool
 ):
-    # @sly.timeit
+    sly.logger.log(g._INFO, f"[MU] Memory usage before sewing chunks: {get_memory_usage():.2f} MB")
     def _save_to_json(res, dst_path):
         json_data = ujson.dumps(res)
         json_bytes = json_data.encode("utf-8")
-        with open(dst_path, "wb") as f:  # Use binary mode
+        with open(dst_path, "wb") as f:
             f.write(json_bytes)
 
     for stat in stats:
@@ -543,6 +551,7 @@ def sew_chunks_to_json(
         res = stat.to_json2()
         if res is not None:
             _save_to_json(res, f"{project_fs_dir}/{stat.basename_stem}.json")
+    sly.logger.log(g._INFO, f"[MU] Memory usage after sewing chunks: {get_memory_usage():.2f} MB")
 
 
 def _update_heatmaps_sample(
@@ -573,7 +582,7 @@ def calculate_and_upload_heatmaps(
     heatmaps_image_ids: Dict[int, Set[int]],
     heatmaps_figure_ids: Dict[int, Set[int]],
 ):
-    sly.logger.log(g._INFO, f"Memory usage before calculating heatmaps: {get_memory_usage():.2f} MB")
+    sly.logger.log(g._INFO, f"[MU] Memory usage before calculating heatmaps: {get_memory_usage():.2f} MB")
     if len(heatmaps_image_ids) == 0:
         return
 
@@ -582,25 +591,25 @@ def calculate_and_upload_heatmaps(
 
         for dataset_id, image_ids in heatmaps_image_ids.items():
             image_infos = g.api.image.get_info_by_id_batch(list(image_ids))
-            sly.logger.log(g._INFO, f"Memory usage after loading image infos: {get_memory_usage():.2f} MB")
+            sly.logger.log(g._INFO, f"[MU] Memory usage after loading image infos: {get_memory_usage():.2f} MB")
 
             for batch_infos in sly.batched(image_infos, 100):
                 batch_ids = [x.id for x in batch_infos]
                 figures = g.api.image.figure.download(dataset_id, batch_ids)
-                sly.logger.log(g._INFO, f"Memory usage after loading figures: {get_memory_usage():.2f} MB")
+                sly.logger.log(g._INFO, f"[MU] Memory usage after loading figures: {get_memory_usage():.2f} MB")
 
                 for image in batch_infos:
                     figs = figures.get(image.id, [])
-                    filtered = [x for x in figs if x.id in heatmaps_figure_ids[x.class_id]]
+                    filtered = [x for x in figs if x.id in heatmaps_figure_ids.get(x.class_id, set())]
                     heatmaps.update2(image, filtered, skip_broken_geometry=True)
                     pbar.update(1)
-                sly.logger.log(g._INFO, f"Memory usage after processing batch: {get_memory_usage():.2f} MB")
+                sly.logger.log(g._INFO, f"[MU] Memory usage after processing batch: {get_memory_usage():.2f} MB")
 
     heatmaps_name = f"{heatmaps.basename_stem}.png"
     fs_heatmap_path = f"{project_fs_dir}/{heatmaps_name}"
     tf_heatmap_path = f"{tf_project_dir}/{heatmaps_name}"
     heatmaps.to_image(fs_heatmap_path)
-    sly.logger.log(g._INFO, f"Memory usage after generating heatmap: {get_memory_usage():.2f} MB")
+    sly.logger.log(g._INFO, f"[MU] Memory usage after generating heatmap: {get_memory_usage():.2f} MB")
 
     g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
     sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
