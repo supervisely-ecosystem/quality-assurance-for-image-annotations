@@ -27,6 +27,7 @@ from supervisely.io.fs import (
     list_files_recursively,
 )
 from supervisely.imaging.color import _validate_hex_color, hex2rgb, random_rgb, rgb2hex
+import psutil
 
 
 def pull_cache(
@@ -432,6 +433,11 @@ def download_stats_chunks_to_buffer(
     return False
 
 
+def get_memory_usage():
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / 1024 / 1024  # в МБ
+
+
 @sly.timeit
 def calculate_stats_and_save_chunks(
     updated_images,
@@ -473,6 +479,7 @@ def calculate_stats_and_save_chunks(
                         )
 
                     pbar.update(len(batch_infos))
+                    sly.logger.log(g._INFO, f"Memory usage after batch: {get_memory_usage():.2f} MB")
 
                 latest_datetime = get_latest_datetime(images_chunk)
                 if g.CHUNKS_LATEST_DATETIME is None or g.CHUNKS_LATEST_DATETIME < latest_datetime:
@@ -480,9 +487,7 @@ def calculate_stats_and_save_chunks(
                 for stat in stats:
                     save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime)
                     stat.clean()
-
-        # if pbar.last_print_n < pbar.total:  # unlabeled images
-        #     pbar.update(pbar.total - pbar.n)
+                sly.logger.log(g._INFO, f"Memory usage after chunk: {get_memory_usage():.2f} MB")
 
     return heatmaps_image_ids, heatmaps_figure_ids
 
