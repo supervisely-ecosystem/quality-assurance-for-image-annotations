@@ -170,6 +170,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     )
 
     stats = [
+        dtools.Overview(project_meta, project_stats),
         dtools.ClassBalance(project_meta, project_stats),
         dtools.ClassCooccurrence(project_meta),
         dtools.ClassesPerImage(project_meta, project_stats, datasets),
@@ -193,6 +194,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
 
     if g.api.file.dir_exists(team.id, tf_project_dir):
         mandatory_class_stats = (
+            dtools.Overview,
             dtools.ClassBalance,
             dtools.ClassCooccurrence,
             dtools.ClassesPerImage,
