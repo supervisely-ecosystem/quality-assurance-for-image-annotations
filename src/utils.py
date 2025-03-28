@@ -573,8 +573,6 @@ def calculate_and_upload_heatmaps(
 ):
     if len(heatmaps_image_ids) == 0:
         return
-    if not os.path.exists(heatmaps.heatmap_image_paths[0]):
-        return
 
     sample_total = sum(len(lst) for lst in heatmaps_image_ids.values())
     with tqdm(desc="Calculating heatmaps from sample", total=sample_total) as pbar:
