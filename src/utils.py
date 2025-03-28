@@ -615,7 +615,9 @@ def calculate_and_upload_heatmaps(
     g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
     sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
     add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
-
+    sly.logger.log(g._INFO, f"Running GC, memory usage: {get_memory_usage():.2f} MB")
+    import gc; gc.collect()
+    sly.logger.log(g._INFO, f"Memory usage after GC: {get_memory_usage():.2f} MB")
 
 def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
     status_path = f"{project_fs_dir}/_cache/heatmaps/status_ok"
