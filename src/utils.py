@@ -162,8 +162,8 @@ def push_cache(
 
 @sly.timeit
 def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
-    result = {d.id: g.api.image.get_list(d.id) for d in datasets}
-    return result
+    return {d.id: g.api.image.get_list(d.id) for d in datasets}
+
 
 
 @sly.timeit
@@ -590,14 +590,14 @@ def calculate_and_upload_heatmaps(
                     heatmaps.update2(image, filtered, skip_broken_geometry=True)
                     pbar.update(1)
 
-    sly.logger.log(g._INFO, f"Heatmaps are calculated, proceeding to save and upload. Memory usage: {get_memory_usage():.2f} MB")
 
     heatmaps_name = f"{heatmaps.basename_stem}.png"
     fs_heatmap_path = f"{project_fs_dir}/{heatmaps_name}"
     tf_heatmap_path = f"{tf_project_dir}/{heatmaps_name}"
     t = time.time()
+    sly.logger.log(g._INFO, f"Memory usage before writing heatmaps: {get_memory_usage():.2f} MB")
     heatmaps.to_image(fs_heatmap_path)
-    sly.logger.log(g._INFO, f"[MU] Memory usage after generating heatmap: {get_memory_usage():.2f} MB")
+    sly.logger.log(g._INFO, f"Memory usage after generating heatmaps: {get_memory_usage():.2f} MB")
     sly.logger.log(g._INFO, f"Time taken to generate heatmap: {time.time() - t:.3f} seconds")
 
     g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
