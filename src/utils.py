@@ -591,25 +591,26 @@ def calculate_and_upload_heatmaps(
 
         for dataset_id, image_ids in heatmaps_image_ids.items():
             image_infos = g.api.image.get_info_by_id_batch(list(image_ids))
-            sly.logger.log(g._INFO, f"[MU] Memory usage after loading image infos: {get_memory_usage():.2f} MB")
 
             for batch_infos in sly.batched(image_infos, 100):
                 batch_ids = [x.id for x in batch_infos]
                 figures = g.api.image.figure.download(dataset_id, batch_ids)
-                sly.logger.log(g._INFO, f"[MU] Memory usage after loading figures: {get_memory_usage():.2f} MB")
 
                 for image in batch_infos:
                     figs = figures.get(image.id, [])
                     filtered = [x for x in figs if x.id in heatmaps_figure_ids.get(x.class_id, set())]
                     heatmaps.update2(image, filtered, skip_broken_geometry=True)
                     pbar.update(1)
-                sly.logger.log(g._INFO, f"[MU] Memory usage after processing batch: {get_memory_usage():.2f} MB")
+
+    sly.logger.log(g._INFO, f"Heatmaps are calculated, proceeding to save and upload. Memory usage: {get_memory_usage():.2f} MB")
 
     heatmaps_name = f"{heatmaps.basename_stem}.png"
     fs_heatmap_path = f"{project_fs_dir}/{heatmaps_name}"
     tf_heatmap_path = f"{tf_project_dir}/{heatmaps_name}"
+    t = time.time()
     heatmaps.to_image(fs_heatmap_path)
     sly.logger.log(g._INFO, f"[MU] Memory usage after generating heatmap: {get_memory_usage():.2f} MB")
+    sly.logger.log(g._INFO, f"Time taken to generate heatmap: {time.time() - t:.3f} seconds")
 
     g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
     sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
