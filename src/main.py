@@ -301,7 +301,6 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
             heatmaps_image_ids,
             heatmaps_figure_ids,
         ),
-        daemon=True,
     )
     thread1.start()
 
