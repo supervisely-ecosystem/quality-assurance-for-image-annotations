@@ -1,5 +1,5 @@
 # deprecated. Use Dockerfile to install dependencies on prod
-dataset-tools==0.1.5
+dataset-tools==0.1.7
 humanize
 ujson
 scikit-image==0.21.0
