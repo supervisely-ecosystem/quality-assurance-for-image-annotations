@@ -1,17 +1,15 @@
 from pathlib import Path
 
-import json, time
+import json
 from packaging.version import Version
 import tarfile
 import os
 import math
-from typing import List, Literal, Optional, Dict, Tuple, Union, Set
+from typing import List, Dict, Tuple, Union, Set
 import dataset_tools as dtools
 from dataset_tools.image.stats.basestats import BaseStats
 from datetime import datetime
-import humanize
 from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo, FigureInfo, TeamInfo
-from itertools import groupby
 from tqdm import tqdm
 import supervisely as sly
 import src.globals as g
