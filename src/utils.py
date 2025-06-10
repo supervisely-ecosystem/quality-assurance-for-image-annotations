@@ -1,17 +1,13 @@
-from pathlib import Path
-
-import json, time
+import json
 from packaging.version import Version
 import tarfile
 import os
 import math
-from typing import List, Literal, Optional, Dict, Tuple, Union, Set
+from typing import List, Dict, Tuple, Union, Set
 import dataset_tools as dtools
 from dataset_tools.image.stats.basestats import BaseStats
 from datetime import datetime
-import humanize
 from supervisely import ImageInfo, ProjectMeta, ProjectInfo, DatasetInfo, FigureInfo, TeamInfo
-from itertools import groupby
 from tqdm import tqdm
 import supervisely as sly
 import src.globals as g
@@ -26,7 +22,7 @@ from supervisely.io.fs import (
     get_file_size,
     list_files_recursively,
 )
-from supervisely.imaging.color import _validate_hex_color, hex2rgb, random_rgb, rgb2hex
+from supervisely.imaging.color import _validate_hex_color, random_rgb, rgb2hex
 
 
 def pull_cache(
@@ -605,6 +601,7 @@ def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
     with open(status_path, "w") as file:
         pass
     g.api.file.upload(team.id, status_path, tf_status_path)
+
 
 @sly.timeit
 def archive_chunks_and_upload(

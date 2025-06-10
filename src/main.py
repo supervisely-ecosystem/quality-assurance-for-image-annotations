@@ -1,19 +1,9 @@
 import os
-import json
-import logging
-from collections import defaultdict
 import src.globals as g
 import src.utils as u
 import supervisely as sly
 from supervisely import ProjectInfo, TeamInfo, WorkspaceInfo
 import dataset_tools as dtools
-from supervisely.io.fs import (
-    get_file_name_with_ext,
-    get_file_name,
-    list_files,
-    get_file_size,
-    list_files_recursively,
-)
 from datetime import datetime, timezone
 import time
 import threading
@@ -27,7 +17,6 @@ from src.ui.input import card_1
 layout = Container(widgets=[card_1], direction="vertical")
 static_dir = Path(g.STORAGE_DIR)
 app = sly.Application(layout=layout, static_dir=static_dir)
-# app = sly.Application()
 server = app.get_server()
 
 
@@ -195,7 +184,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
 
     if g.api.file.dir_exists(team.id, tf_project_dir):
         mandatory_class_stats = (
-            dtools.OverviewPie, 
+            dtools.OverviewPie,
             dtools.OverviewDonut,
             dtools.ClassBalance,
             dtools.ClassCooccurrence,
