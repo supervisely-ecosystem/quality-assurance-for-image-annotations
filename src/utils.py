@@ -22,7 +22,7 @@ from supervisely.io.fs import (
     get_file_size,
     list_files_recursively,
 )
-from supervisely.imaging.color import _validate_hex_color, hex2rgb, random_rgb, rgb2hex
+from supervisely.imaging.color import _validate_hex_color, random_rgb, rgb2hex
 
 
 def pull_cache(
