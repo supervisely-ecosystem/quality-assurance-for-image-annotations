@@ -17,7 +17,6 @@ from src.ui.input import card_1
 layout = Container(widgets=[card_1], direction="vertical")
 static_dir = Path(g.STORAGE_DIR)
 app = sly.Application(layout=layout, static_dir=static_dir)
-# app = sly.Application()
 server = app.get_server()
 
 
