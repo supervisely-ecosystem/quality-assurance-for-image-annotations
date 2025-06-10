@@ -10,5 +10,5 @@
   "entrypoint": "python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --log-level warning",
   "port": 8000,
   "instance_version": "6.11.16",
-  "docker_image": "supervisely/quality-assurance:0.1.2"
+  "docker_image": "supervisely/quality-assurance:0.1.3"
 }
