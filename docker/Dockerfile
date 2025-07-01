@@ -4,7 +4,7 @@ FROM supervisely/base-py-sdk:6.73.197
 # RUN python3 -m pip install -r dev_requirements.txt
 # git+https://github.com/supervisely/supervisely.git@figures_download_all_pages
 
-RUN pip install dataset-tools==0.1.8
+RUN pip install dataset-tools==0.1.9
 RUN pip install humanize
 RUN pip install ujson
 RUN pip install scikit-image==0.21.0
