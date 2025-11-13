@@ -62,16 +62,32 @@ def stats_endpoint(project_id: int, user_id: int = None):
         active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
         sly.fs.silent_remove(active_project_path)
 
+        # Clean up resources if project info is available
         if project is not None:
             tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
             project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
+
             # Clean up lock file on error to prevent deadlock
             lock_file_path = f"{project_fs_dir}/.processing.lock"
             sly.fs.silent_remove(lock_file_path)
 
-        if team is not None:
-            g.api.file.remove(team.id, active_project_path_tf)
-            u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
+            # Clean up team files if team info is available
+            if team is not None:
+                try:
+                    g.api.file.remove(team.id, active_project_path_tf)
+                except Exception as cleanup_error:
+                    sly.logger.warning(f"Failed to remove active project file: {cleanup_error}")
+
+                try:
+                    u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
+                except Exception as cleanup_error:
+                    sly.logger.warning(f"Failed to add heatmaps status: {cleanup_error}")
+        elif team is not None:
+            # Only remove active project file if we have team but not project info
+            try:
+                g.api.file.remove(team.id, active_project_path_tf)
+            except Exception as cleanup_error:
+                sly.logger.warning(f"Failed to remove active project file: {cleanup_error}")
 
         raise HTTPException(
             status_code=500,

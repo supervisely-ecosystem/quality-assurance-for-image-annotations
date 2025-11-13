@@ -594,13 +594,36 @@ def calculate_and_upload_heatmaps(
 
 
 def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
+    """
+    Creates a status file indicating heatmaps processing is complete.
+
+    Args:
+        team: TeamInfo object
+        tf_project_dir: Path to project directory in Team Files
+        project_fs_dir: Path to project directory in local filesystem
+    """
     status_path = f"{project_fs_dir}/_cache/heatmaps/status_ok"
     tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
-    os.makedirs(f"{project_fs_dir}/_cache/heatmaps", exist_ok=True)
-    # Path(status_path).touch()
-    with open(status_path, "w") as file:
-        pass
-    g.api.file.upload(team.id, status_path, tf_status_path)
+
+    try:
+        os.makedirs(f"{project_fs_dir}/_cache/heatmaps", exist_ok=True)
+
+        # Create local status file
+        with open(status_path, "w") as file:
+            file.write(f"OK at {datetime.now().isoformat()}")
+
+        # Remove existing status file in Team Files if it exists
+        if g.api.file.exists(team.id, tf_status_path):
+            g.api.file.remove(team.id, tf_status_path)
+
+        # Upload new status file
+        result = g.api.file.upload(team.id, status_path, tf_status_path)
+        if result:
+            sly.logger.log(g._INFO, "Heatmaps status OK file uploaded successfully")
+        else:
+            sly.logger.warning("Failed to upload heatmaps status file")
+    except Exception as e:
+        sly.logger.warning(f"Error in add_heatmaps_status_ok: {e}")
 
 
 @sly.timeit
