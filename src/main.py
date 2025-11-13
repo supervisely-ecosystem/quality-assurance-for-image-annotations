@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from supervisely.app.widgets import Container
 from src.ui.input import card_1
+import fcntl
 
 
 layout = Container(widgets=[card_1], direction="vertical")
@@ -60,9 +61,14 @@ def stats_endpoint(project_id: int, user_id: int = None):
         active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
         active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
         sly.fs.silent_remove(active_project_path)
+
         if project is not None:
             tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
             project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
+            # Clean up lock file on error to prevent deadlock
+            lock_file_path = f"{project_fs_dir}/.processing.lock"
+            sly.fs.silent_remove(lock_file_path)
+
         if team is not None:
             g.api.file.remove(team.id, active_project_path_tf)
             u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
@@ -90,12 +96,31 @@ def _remove_old_active_project_request(now, team, file):
 
 
 def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
+    """
+    Checks if the QA tab is active for the project.
+    Uses Team Files as the primary lock mechanism to prevent race conditions across multiple app instances.
+    Local file lock is used only for optimization within the same app instance.
 
+    The locking strategy:
+    1. First check Team Files (global lock across all app instances)
+    2. If no lock exists, use local file lock to ensure atomicity within this instance
+    3. Double-check Team Files again before creating the lock (prevents race between instances)
+    4. Create lock file in Team Files
+
+    Args:
+        team: TeamInfo object containing team information
+        project: ProjectInfo object containing project information
+
+    Returns:
+        str: Path to the active project file in team files, or JSONResponse if project is busy
+    """
     sly.logger.log(g._INFO, "Checking requests...")
 
     active_project_path_local = f"{g.ACTIVE_REQUESTS_DIR}/{project.id}"
     active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project.id}"
+    lock_file_path = f"{g.ACTIVE_REQUESTS_DIR}/{project.id}.lock"
 
+    # First check: Check Team Files for existing lock (global check across all app instances)
     file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
     if file is not None:
         now = datetime.now(timezone.utc)
@@ -103,22 +128,50 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
         if g.api.file.exists(team.id, file.path) is True:
             msg = f"Request for the project with ID={project.id} is busy. Wait until the previous one will be finished..."
             sly.logger.log(g._INFO, msg)
-            while True:
-                if g.api.file.exists(team.id, active_project_path_tf):
-                    now = datetime.now(timezone.utc)
-                    _remove_old_active_project_request(now, team, file)
-                    time.sleep(5)
-                else:
-                    break
             return JSONResponse({"message": msg})
 
-    # Path(active_project_path_local).touch()
-    with open(active_project_path_local, "w") as file:
-        pass
+    # Use local file lock for atomic operations within this app instance
     try:
-        g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
-    except:
-        pass
+        with open(lock_file_path, "w") as lock_file:
+            # Try to acquire exclusive lock (non-blocking) - prevents race within same instance
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except IOError:
+                # Lock is already held by another request in this app instance
+                msg = f"Request for the project with ID={project.id} is busy in this app instance. Wait until the previous one will be finished..."
+                sly.logger.log(g._INFO, msg)
+                return JSONResponse({"message": msg})
+
+            # Double-check Team Files before creating lock (prevents race between different instances)
+            file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
+            if file is not None:
+                now = datetime.now(timezone.utc)
+                _remove_old_active_project_request(now, team, file)
+                if g.api.file.exists(team.id, file.path) is True:
+                    msg = f"Request for the project with ID={project.id} is busy. Wait until the previous one will be finished..."
+                    sly.logger.log(g._INFO, msg)
+                    return JSONResponse({"message": msg})
+
+            # Create the lock file locally
+            with open(active_project_path_local, "w") as request_file:
+                request_file.write(f"Started at: {datetime.now(timezone.utc).isoformat()}")
+
+            # Upload to Team Files - this becomes the global lock
+            try:
+                g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
+                sly.logger.log(g._INFO, f"Created active request file for project {project.id}")
+            except Exception as e:
+                sly.logger.warning(f"Failed to upload active request file: {e}")
+                # Clean up local file if upload failed
+                sly.fs.silent_remove(active_project_path_local)
+                raise
+
+    except Exception as e:
+        sly.logger.error(f"Error in check_if_QA_tab_is_active: {e}")
+        raise
+    finally:
+        # Lock is automatically released when the file is closed
+        sly.fs.silent_remove(lock_file_path)
 
     sly.logger.log(g._INFO, "Finish checking if 'QA & Stats' tab is active.")
     return active_project_path_tf
@@ -179,7 +232,32 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
 
     if sly.fs.dir_exists(project_fs_dir):
-        sly.fs.clean_dir(project_fs_dir)
+        # Additional check before cleaning to prevent conflicts with concurrent processes
+        lock_file_path = f"{project_fs_dir}/.processing.lock"
+        try:
+            if os.path.exists(lock_file_path):
+                sly.logger.log(
+                    g._WARNING, f"Another process is working with {project_fs_dir}. Waiting..."
+                )
+                # Wait for directory to be released
+                max_wait = 300  # 5 minutes maximum
+                wait_time = 0
+                while os.path.exists(lock_file_path) and wait_time < max_wait:
+                    time.sleep(5)
+                    wait_time += 5
+                if os.path.exists(lock_file_path):
+                    sly.logger.log(
+                        g._WARNING, f"Timeout waiting for directory lock. Proceeding anyway."
+                    )
+
+            # Create lock file to indicate this process is working with the directory
+            with open(lock_file_path, "w") as f:
+                f.write(f"Locked by process at {datetime.now(timezone.utc).isoformat()}")
+
+            sly.fs.clean_dir(project_fs_dir)
+        except Exception as e:
+            sly.logger.log(g._WARNING, f"Error handling directory lock: {e}")
+            # Continue even if lock failed to avoid blocking the entire process
     os.makedirs(project_fs_dir, exist_ok=True)
 
     if g.api.file.dir_exists(team.id, tf_project_dir):
@@ -233,6 +311,11 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0 and not is_meta_changed:
         sly.logger.log(g._INFO, "Nothing to update. Skipping stats calculation...")
+
+        # Clean up lock file before early exit to prevent deadlock
+        lock_file_path = f"{project_fs_dir}/.processing.lock"
+        sly.fs.silent_remove(lock_file_path)
+
         if isinstance(active_project_path_tf, str):
             g.api.file.remove(team.id, active_project_path_tf)
         u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
@@ -306,6 +389,11 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
     u.push_cache(team.id, project.id, tf_project_dir, project_fs_dir, _cache)
+
+    # Clean up lock file after processing is complete
+    lock_file_path = f"{project_fs_dir}/.processing.lock"
+    sly.fs.silent_remove(lock_file_path)
+
     # sly.fs.silent_remove(active_project_path)
     if isinstance(active_project_path_tf, str):
         g.api.file.remove(team.id, active_project_path_tf)
