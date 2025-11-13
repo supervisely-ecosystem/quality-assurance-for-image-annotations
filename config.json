@@ -1,14 +1,14 @@
 {
-  "type": "app",
-  "version": "2.0.0",
-  "name": "On-the-Fly Quality Assurance",
-  "description": "Get instant DatasetNinja statistics for your project",
-  "categories": ["system"],
-  "session_tags": ["scalable"],
-  "icon_cover": true,
-  "headless": false,
-  "entrypoint": "python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --log-level warning",
-  "port": 8000,
-  "instance_version": "6.11.16",
-  "docker_image": "supervisely/quality-assurance:0.1.4"
+	"type": "app",
+	"version": "2.0.0",
+	"name": "On-the-Fly Quality Assurance",
+	"description": "Get instant DatasetNinja statistics for your project",
+	"categories": ["system"],
+	"session_tags": ["scalable"],
+	"icon_cover": true,
+	"headless": false,
+	"entrypoint": "python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --log-level warning",
+	"port": 8000,
+	"instance_version": "6.15.2",
+	"docker_image": "supervisely/quality-assurance:0.1.5"
 }
