@@ -623,7 +623,7 @@ def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
         else:
             sly.logger.warning("Failed to upload heatmaps status file")
     except Exception as e:
-        sly.logger.warning(f"Error in add_heatmaps_status_ok: {e}")
+        sly.logger.warning(f"Error in add_heatmaps_status_ok: {repr(e)}")
 
 
 @sly.timeit
