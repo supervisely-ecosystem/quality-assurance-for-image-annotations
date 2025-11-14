@@ -356,55 +356,6 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                         f"The applicability of tag stat {stat.basename_stem!r} has been changed. Deleting the old stat from team files.",
                     )
 
-        # Check for heatmaps (separately from stats - heatmaps can be missing while stats are ready)
-        heatmaps_path = f"{tf_project_dir}/{heatmaps.basename_stem}.png"
-        heatmaps_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
-
-        if not g.api.file.exists(team.id, heatmaps_path):
-            # Heatmaps file doesn't exist
-            # Check if heatmaps are currently being calculated (no status_ok = in progress)
-            if not g.api.file.exists(team.id, heatmaps_status_path):
-                # Heatmaps are being calculated by another request - wait for them
-                sly.logger.log(
-                    g._INFO,
-                    f"Heatmaps are being calculated. Waiting for completion...",
-                )
-                max_wait = 600  # 10 minutes maximum wait for heatmaps
-                wait_time = 0
-                while wait_time < max_wait:
-                    time.sleep(10)
-                    wait_time += 10
-                    if g.api.file.exists(team.id, heatmaps_path):
-                        sly.logger.log(
-                            g._INFO,
-                            f"Heatmaps became available after {wait_time} seconds",
-                        )
-                        break
-                    if g.api.file.exists(team.id, heatmaps_status_path):
-                        # status_ok appeared but no heatmaps - calculation failed
-                        sly.logger.log(
-                            g._WARNING,
-                            f"Heatmaps calculation failed (status_ok without file). Will recalculate heatmaps only.",
-                        )
-                        g.api.file.remove(team.id, heatmaps_status_path)
-                        force_heatmaps_recalc = True
-                        break
-                else:
-                    # Timeout - assume heatmaps calculation failed
-                    sly.logger.log(
-                        g._WARNING,
-                        f"Timeout waiting for heatmaps after {max_wait} seconds. Will recalculate heatmaps only.",
-                    )
-                    force_heatmaps_recalc = True
-            else:
-                # status_ok exists but no heatmaps file - stale marker, need recalculation
-                sly.logger.log(
-                    g._WARNING,
-                    f"Found status_ok without heatmaps file - removing stale status marker. Will recalculate heatmaps only.",
-                )
-                g.api.file.remove(team.id, heatmaps_status_path)
-                force_heatmaps_recalc = True
-
     images_all_dct = u.get_project_images_all(datasets)
     updated_images, updated_classes, _cache, is_meta_changed = u.get_updated_images_and_classes(
         project, project_meta, datasets, images_all_dct, force_stats_recalc, _cache
@@ -419,8 +370,37 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
 
         if isinstance(active_project_path_tf, str):
             g.api.file.remove(team.id, active_project_path_tf)
-        u.add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
         return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
+
+    # Check for heatmaps status to decide if need to wait or recalculate
+    if g.api.file.dir_exists(team.id, tf_project_dir):
+        heatmaps_path = f"{tf_project_dir}/{heatmaps.basename_stem}.png"
+        heatmaps_status_ok_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+        heatmaps_status_in_progress_path = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
+
+        if not g.api.file.exists(team.id, heatmaps_path):
+            # Heatmaps file doesn't exist - check status markers
+            if g.api.file.exists(team.id, heatmaps_status_in_progress_path):
+                # Heatmaps are actively being calculated by another request - DON'T WAIT, frontend will handle
+                sly.logger.log(
+                    g._INFO,
+                    f"Heatmaps are being calculated by another process. Frontend will check availability.",
+                )
+            elif g.api.file.exists(team.id, heatmaps_status_ok_path):
+                # status_ok exists but no heatmaps file - stale/broken state
+                sly.logger.log(
+                    g._WARNING,
+                    f"Found status_ok without heatmaps file - removing stale status marker. Will recalculate heatmaps.",
+                )
+                g.api.file.remove(team.id, heatmaps_status_ok_path)
+                force_heatmaps_recalc = True
+            else:
+                # No heatmaps, no status markers - never calculated or cleanup happened
+                sly.logger.log(
+                    g._INFO,
+                    f"Heatmaps not found and no status markers. Will calculate them.",
+                )
+                force_heatmaps_recalc = True
 
     if getattr(project, "items_count", None) is None:
         force_stats_recalc = True
@@ -435,19 +415,27 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         # When recalculating stats, also mark heatmaps for recalculation
         if force_stats_recalc:
             force_heatmaps_recalc = True
-            tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
-            g.api.file.remove(team.id, tf_status_path)
+            # Remove both status files to ensure clean state
+            tf_status_ok = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+            tf_status_in_progress = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
+            g.api.file.remove(team.id, tf_status_ok)
+            g.api.file.remove(team.id, tf_status_in_progress)
 
     # If recalculating stats, also need to recalculate heatmaps
     if force_stats_recalc is True:
         force_heatmaps_recalc = True
-        tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
-        g.api.file.remove(team.id, tf_status_path)
+        # Remove both status files to ensure clean state
+        tf_status_ok = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+        tf_status_in_progress = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
+        g.api.file.remove(team.id, tf_status_ok)
+        g.api.file.remove(team.id, tf_status_in_progress)
 
-    # If only heatmaps need recalculation, just remove status_ok
+    # If only heatmaps need recalculation, remove all status files
     if force_heatmaps_recalc is True and force_stats_recalc is False:
-        tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
-        g.api.file.remove(team.id, tf_status_path)
+        tf_status_ok = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+        tf_status_in_progress = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
+        g.api.file.remove(team.id, tf_status_ok)
+        g.api.file.remove(team.id, tf_status_in_progress)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project.id, datasets, images_all_dct)
     updated_images = u.check_idxs_integrity(
