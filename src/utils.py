@@ -567,40 +567,115 @@ def calculate_and_upload_heatmaps(
     if len(heatmaps_image_ids) == 0:
         return
 
-    sample_total = sum(len(lst) for lst in heatmaps_image_ids.values())
-    with tqdm(desc="Calculating heatmaps from sample", total=sample_total) as pbar:
+    # Mark heatmaps calculation as in progress
+    add_heatmaps_status_in_progress(team, tf_project_dir, project_fs_dir)
 
-        for dataset_id, image_ids in heatmaps_image_ids.items():
-            image_infos = g.api.image.get_info_by_id_batch(list(image_ids))
+    try:
+        sample_total = sum(len(lst) for lst in heatmaps_image_ids.values())
+        with tqdm(desc="Calculating heatmaps from sample", total=sample_total) as pbar:
 
-            for batch_infos in sly.batched(image_infos, 100):
-                batch_ids = [x.id for x in batch_infos]
-                figures = g.api.image.figure.download(dataset_id, batch_ids)
+            for dataset_id, image_ids in heatmaps_image_ids.items():
+                image_infos = g.api.image.get_info_by_id_batch(list(image_ids))
 
-                for image in batch_infos:
-                    figs = figures.get(image.id, [])
-                    filtered = [x for x in figs if x.id in heatmaps_figure_ids[x.class_id]]
-                    heatmaps.update2(image, filtered, skip_broken_geometry=True)
-                    pbar.update(1)
+                for batch_infos in sly.batched(image_infos, 100):
+                    batch_ids = [x.id for x in batch_infos]
+                    figures = g.api.image.figure.download(dataset_id, batch_ids)
 
-    heatmaps_name = f"{heatmaps.basename_stem}.png"
-    fs_heatmap_path = f"{project_fs_dir}/{heatmaps_name}"
-    tf_heatmap_path = f"{tf_project_dir}/{heatmaps_name}"
-    heatmaps.to_image(fs_heatmap_path)
+                    for image in batch_infos:
+                        figs = figures.get(image.id, [])
+                        filtered = [x for x in figs if x.id in heatmaps_figure_ids[x.class_id]]
+                        heatmaps.update2(image, filtered, skip_broken_geometry=True)
+                        pbar.update(1)
 
-    g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
-    sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
-    add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
+        heatmaps_name = f"{heatmaps.basename_stem}.png"
+        fs_heatmap_path = f"{project_fs_dir}/{heatmaps_name}"
+        tf_heatmap_path = f"{tf_project_dir}/{heatmaps_name}"
+        heatmaps.to_image(fs_heatmap_path)
+
+        g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
+        sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
+        add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
+
+    except Exception as e:
+        # If heatmaps calculation fails, remove in_progress marker
+        sly.logger.error(f"Error calculating heatmaps: {repr(e)}")
+        tf_status_in_progress = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
+        try:
+            g.api.file.remove(team.id, tf_status_in_progress)
+            sly.logger.log(g._INFO, "Removed in_progress marker after heatmaps calculation failure")
+        except Exception as cleanup_error:
+            sly.logger.warning(f"Failed to remove in_progress marker: {repr(cleanup_error)}")
+        raise
+
+
+def add_heatmaps_status_in_progress(team, tf_project_dir, project_fs_dir):
+    """
+    Creates a status file indicating heatmaps are currently being calculated.
+
+    Args:
+        team: TeamInfo object
+        tf_project_dir: Path to project directory in Team Files
+        project_fs_dir: Path to project directory in local filesystem
+    """
+    status_path = f"{project_fs_dir}/_cache/heatmaps/status_in_progress"
+    tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
+
+    try:
+        os.makedirs(f"{project_fs_dir}/_cache/heatmaps", exist_ok=True)
+
+        # Create local status file with timestamp
+        with open(status_path, "w") as file:
+            file.write(f"Started at {datetime.now().isoformat()}")
+
+        # Remove existing status file in Team Files if it exists
+        if g.api.file.exists(team.id, tf_status_path):
+            g.api.file.remove(team.id, tf_status_path)
+
+        # Upload new status file
+        result = g.api.file.upload(team.id, status_path, tf_status_path)
+        if result:
+            sly.logger.log(g._INFO, "Heatmaps status IN_PROGRESS file uploaded successfully")
+        else:
+            sly.logger.warning("Failed to upload heatmaps in_progress status file")
+    except Exception as e:
+        sly.logger.warning(f"Error in add_heatmaps_status_in_progress: {repr(e)}")
 
 
 def add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir):
+    """
+    Creates a status file indicating heatmaps processing is complete.
+    Also removes the in_progress status file if it exists.
+
+    Args:
+        team: TeamInfo object
+        tf_project_dir: Path to project directory in Team Files
+        project_fs_dir: Path to project directory in local filesystem
+    """
     status_path = f"{project_fs_dir}/_cache/heatmaps/status_ok"
     tf_status_path = f"{tf_project_dir}/_cache/heatmaps/status_ok"
-    os.makedirs(f"{project_fs_dir}/_cache/heatmaps", exist_ok=True)
-    # Path(status_path).touch()
-    with open(status_path, "w") as file:
-        pass
-    g.api.file.upload(team.id, status_path, tf_status_path)
+    tf_in_progress_path = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
+
+    try:
+        os.makedirs(f"{project_fs_dir}/_cache/heatmaps", exist_ok=True)
+
+        # Create local status file
+        with open(status_path, "w") as file:
+            file.write(f"OK at {datetime.now().isoformat()}")
+
+        # Remove existing status files in Team Files
+        if g.api.file.exists(team.id, tf_status_path):
+            g.api.file.remove(team.id, tf_status_path)
+        if g.api.file.exists(team.id, tf_in_progress_path):
+            g.api.file.remove(team.id, tf_in_progress_path)
+
+        # Upload new status file
+        result = g.api.file.upload(team.id, status_path, tf_status_path)
+        if result:
+            sly.logger.log(g._INFO, "Heatmaps status OK file uploaded successfully")
+        else:
+            sly.logger.warning("Failed to upload heatmaps status file")
+    except Exception as e:
+        sly.logger.warning(f"Error in add_heatmaps_status_ok: {repr(e)}")
 
 
 @sly.timeit
