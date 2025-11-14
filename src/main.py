@@ -185,7 +185,7 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
                         if attempt == 1:
                             sly.logger.log(
                                 g._INFO,
-                                f"Request for project ID={project.id} is in queue (another app instance busy). Waiting...",
+                                f"Request for project ID={project.id} is in queue (app instance is busy). Waiting...",
                             )
                         # Lock will be released when exiting 'with' block
                         time.sleep(5)
