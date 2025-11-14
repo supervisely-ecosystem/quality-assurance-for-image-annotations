@@ -118,10 +118,10 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
     Local file lock is used only for optimization within the same app instance.
 
     The locking strategy:
-    1. First check Team Files (global lock across all app instances)
-    2. If no lock exists, use local file lock to ensure atomicity within this instance
-    3. Double-check Team Files again before creating the lock (prevents race between instances)
-    4. Create lock file in Team Files
+    1. Acquire local file lock FIRST (atomic within instance)
+    2. Check Team Files for existing lock (global check across all app instances)
+    3. If no lock exists, create lock file in Team Files
+    4. Triple-check Team Files after upload to ensure our lock was successful
 
     Args:
         team: TeamInfo object containing team information
@@ -136,17 +136,10 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
     active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project.id}"
     lock_file_path = f"{g.ACTIVE_REQUESTS_DIR}/{project.id}.lock"
 
-    # First check: Check Team Files for existing lock (global check across all app instances)
-    file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
-    if file is not None:
-        now = datetime.now(timezone.utc)
-        _remove_old_active_project_request(now, team, file)
-        if g.api.file.exists(team.id, file.path) is True:
-            msg = f"Request for the project with ID={project.id} is busy. Wait until the previous one will be finished..."
-            sly.logger.log(g._INFO, msg)
-            return JSONResponse({"message": msg})
+    # Create directories if they don't exist
+    os.makedirs(g.ACTIVE_REQUESTS_DIR, exist_ok=True)
 
-    # Use local file lock for atomic operations within this app instance
+    # Acquire local file lock FIRST - this ensures only one thread per instance can proceed
     try:
         with open(lock_file_path, "w") as lock_file:
             # Try to acquire exclusive lock (non-blocking) - prevents race within same instance
@@ -158,7 +151,7 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
                 sly.logger.log(g._INFO, msg)
                 return JSONResponse({"message": msg})
 
-            # Double-check Team Files before creating lock (prevents race between different instances)
+            # Now that we have local lock, check Team Files (global lock across all instances)
             file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
             if file is not None:
                 now = datetime.now(timezone.utc)
@@ -182,6 +175,14 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
                 sly.fs.silent_remove(active_project_path_local)
                 raise
 
+            # Triple-check: verify our lock file was successfully created
+            file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
+            if file is None:
+                msg = f"Failed to create lock file for project {project.id}. Another request may have interfered."
+                sly.logger.warning(msg)
+                sly.fs.silent_remove(active_project_path_local)
+                raise Exception(msg)
+
     except Exception as e:
         sly.logger.error(f"Error in check_if_QA_tab_is_active: {e}")
         raise
@@ -198,6 +199,10 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     g.initialize_log_levels(project.id)
 
     active_project_path_tf = check_if_QA_tab_is_active(team, project)
+
+    # If project is busy, return early with the response
+    if isinstance(active_project_path_tf, JSONResponse):
+        return active_project_path_tf
 
     sly.logger.log(g._INFO, "Start Quality Assurance.")
 
