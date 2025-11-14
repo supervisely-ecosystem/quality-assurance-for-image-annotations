@@ -381,11 +381,34 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         if not g.api.file.exists(team.id, heatmaps_path):
             # Heatmaps file doesn't exist - check status markers
             if g.api.file.exists(team.id, heatmaps_status_in_progress_path):
-                # Heatmaps are actively being calculated by another request - DON'T WAIT, frontend will handle
-                sly.logger.log(
-                    g._INFO,
-                    f"Heatmaps are being calculated by another process. Frontend will check availability.",
-                )
+                # Check if in_progress marker is stale (older than 15 minutes)
+                file_info = g.api.file.get_info_by_path(team.id, heatmaps_status_in_progress_path)
+                if file_info is not None:
+                    now = datetime.now(timezone.utc)
+                    file_time = datetime.fromisoformat(file_info.updated_at[:-1]).replace(
+                        tzinfo=timezone.utc
+                    )
+                    age_seconds = (now - file_time).total_seconds()
+
+                    if age_seconds > 900:  # 15 minutes
+                        sly.logger.log(
+                            g._WARNING,
+                            f"Found stale in_progress marker (age: {int(age_seconds)}s). Removing and will recalculate.",
+                        )
+                        g.api.file.remove(team.id, heatmaps_status_in_progress_path)
+                        force_heatmaps_recalc = True
+                    else:
+                        # Heatmaps are actively being calculated - DON'T WAIT, frontend will handle
+                        sly.logger.log(
+                            g._INFO,
+                            f"Heatmaps are being calculated by another process (age: {int(age_seconds)}s). Frontend will check availability.",
+                        )
+                else:
+                    # File exists but can't get info - assume it's being calculated
+                    sly.logger.log(
+                        g._INFO,
+                        f"Heatmaps are being calculated by another process. Frontend will check availability.",
+                    )
             elif g.api.file.exists(team.id, heatmaps_status_ok_path):
                 # status_ok exists but no heatmaps file - stale/broken state
                 sly.logger.log(
