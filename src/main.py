@@ -113,22 +113,26 @@ def _remove_old_active_project_request(now, team, file):
 
 def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
     """
-    Checks if the QA tab is active for the project.
+    Checks if the QA tab is active for the project and waits in queue if busy.
     Uses Team Files as the primary lock mechanism to prevent race conditions across multiple app instances.
-    Local file lock is used only for optimization within the same app instance.
+    Local file lock is used for optimization within the same app instance.
 
-    The locking strategy:
+    The locking strategy with queue:
     1. Acquire local file lock FIRST (atomic within instance)
     2. Check Team Files for existing lock (global check across all app instances)
-    3. If no lock exists, create lock file in Team Files
-    4. Triple-check Team Files after upload to ensure our lock was successful
+    3. If locked by another process:
+       - Release local lock
+       - Wait in queue until lock is released
+       - Try again from step 1
+    4. If not locked, create lock file in Team Files
+    5. Triple-check Team Files after upload to ensure our lock was successful
 
     Args:
         team: TeamInfo object containing team information
         project: ProjectInfo object containing project information
 
     Returns:
-        str: Path to the active project file in team files, or JSONResponse if project is busy
+        str: Path to the active project file in team files
     """
     sly.logger.log(g._INFO, "Checking requests...")
 
@@ -139,70 +143,103 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
     # Create directories if they don't exist
     os.makedirs(g.ACTIVE_REQUESTS_DIR, exist_ok=True)
 
-    # Acquire local file lock FIRST - this ensures only one thread per instance can proceed
-    try:
-        with open(lock_file_path, "w") as lock_file:
-            # Try to acquire exclusive lock (non-blocking) - prevents race within same instance
-            try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except IOError:
-                # Lock is already held by another request in this app instance
-                msg = f"Request for the project with ID={project.id} is busy in this app instance. Wait until the previous one will be finished..."
-                sly.logger.log(g._INFO, msg)
-                return JSONResponse({"message": msg})
+    max_wait_time = 600  # 10 minutes maximum wait time
+    start_time = time.time()
+    attempt = 0
 
-            # Now that we have local lock, check Team Files (global lock across all instances)
-            file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
-            if file is not None:
-                now = datetime.now(timezone.utc)
-                _remove_old_active_project_request(now, team, file)
-                if g.api.file.exists(team.id, file.path) is True:
-                    msg = f"Request for the project with ID={project.id} is busy. Wait until the previous one will be finished..."
-                    sly.logger.log(g._INFO, msg)
-                    return JSONResponse({"message": msg})
+    while True:
+        attempt += 1
 
-            # Create the lock file locally
-            with open(active_project_path_local, "w") as request_file:
-                request_file.write(f"Started at: {datetime.now(timezone.utc).isoformat()}")
+        # Check if we've exceeded maximum wait time
+        if time.time() - start_time > max_wait_time:
+            msg = f"Timeout waiting for project {project.id} to become available after {max_wait_time} seconds"
+            sly.logger.error(msg)
+            raise Exception(msg)
 
-            # Upload to Team Files - this becomes the global lock
-            try:
-                g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
-                sly.logger.log(g._INFO, f"Created active request file for project {project.id}")
-            except Exception as e:
-                sly.logger.warning(f"Failed to upload active request file: {e}")
-                # Clean up local file if upload failed
-                sly.fs.silent_remove(active_project_path_local)
-                raise
+        # Acquire local file lock FIRST - this ensures only one thread per app instance can proceed
+        try:
+            with open(lock_file_path, "w") as lock_file:
+                # Try to acquire exclusive lock (non-blocking) - prevents race within same app instance
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except IOError:
+                    # Lock is already held by another request in this app instance
+                    # Wait and retry
+                    if attempt == 1:
+                        sly.logger.log(
+                            g._INFO,
+                            f"Request for project ID={project.id} is in queue (this app instance is busy). Waiting...",
+                        )
+                    time.sleep(5)
+                    continue
 
-            # Triple-check: verify our lock file was successfully created
-            file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
-            if file is None:
-                msg = f"Failed to create lock file for project {project.id}. Another request may have interfered."
-                sly.logger.warning(msg)
-                sly.fs.silent_remove(active_project_path_local)
-                raise Exception(msg)
+                # Now that we have local lock, check Team Files (global lock across all app instances)
+                file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
+                if file is not None:
+                    now = datetime.now(timezone.utc)
+                    _remove_old_active_project_request(now, team, file)
 
-    except Exception as e:
-        sly.logger.error(f"Error in check_if_QA_tab_is_active: {e}")
-        raise
-    finally:
-        # Lock is automatically released when the file is closed
-        sly.fs.silent_remove(lock_file_path)
+                    # Check if file still exists after cleanup
+                    if g.api.file.exists(team.id, file.path) is True:
+                        # Another app instance is processing - release local lock and wait
+                        if attempt == 1:
+                            sly.logger.log(
+                                g._INFO,
+                                f"Request for project ID={project.id} is in queue (another app instance busy). Waiting...",
+                            )
+                        # Lock will be released when exiting 'with' block
+                        time.sleep(5)
+                        continue
 
-    sly.logger.log(g._INFO, "Finish checking if 'QA & Stats' tab is active.")
-    return active_project_path_tf
+                # No locks exist - we can proceed!
+                # Create the lock file locally
+                with open(active_project_path_local, "w") as request_file:
+                    request_file.write(f"Started at: {datetime.now(timezone.utc).isoformat()}")
+
+                # Upload to Team Files - this becomes the global lock
+                try:
+                    g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
+                    sly.logger.log(g._INFO, f"Created active request file for project {project.id}")
+                except Exception as e:
+                    sly.logger.warning(f"Failed to upload active request file: {e}")
+                    # Clean up local file if upload failed
+                    sly.fs.silent_remove(active_project_path_local)
+                    raise
+
+                # Triple-check: verify our lock file was successfully created
+                file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
+                if file is None:
+                    msg = f"Failed to create lock file for project {project.id}. Retrying..."
+                    sly.logger.warning(msg)
+                    sly.fs.silent_remove(active_project_path_local)
+                    time.sleep(2)
+                    continue
+
+                # Success! We have the lock
+                if attempt > 1:
+                    wait_time = int(time.time() - start_time)
+                    sly.logger.log(
+                        g._INFO,
+                        f"Project {project.id} lock acquired after waiting {wait_time} seconds",
+                    )
+
+                sly.fs.silent_remove(lock_file_path)
+                sly.logger.log(g._INFO, "Finish checking if 'QA & Stats' tab is active.")
+                return active_project_path_tf
+
+        except Exception as e:
+            sly.logger.error(f"Error in check_if_QA_tab_is_active: {e}")
+            # Clean up lock file
+            sly.fs.silent_remove(lock_file_path)
+            raise
 
 
 def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
 
     g.initialize_log_levels(project.id)
 
+    # This will wait in queue if project is busy, then acquire lock when available
     active_project_path_tf = check_if_QA_tab_is_active(team, project)
-
-    # If project is busy, return early with the response
-    if isinstance(active_project_path_tf, JSONResponse):
-        return active_project_path_tf
 
     sly.logger.log(g._INFO, "Start Quality Assurance.")
 
