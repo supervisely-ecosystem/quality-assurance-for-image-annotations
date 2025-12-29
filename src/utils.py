@@ -25,6 +25,27 @@ from supervisely.io.fs import (
 from supervisely.imaging.color import _validate_hex_color, random_rgb, rgb2hex
 
 
+def log_ram(stage: str) -> None:
+    try:
+        rss_bytes = None
+        try:
+            import psutil
+
+            rss_bytes = psutil.Process(os.getpid()).memory_info().rss
+        except Exception:
+            import resource
+
+            rss_kib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            rss_bytes = int(rss_kib) * 1024
+
+        rss_mib = (rss_bytes or 0) / (1024 * 1024)
+        msg = f"[mem] {stage}: rss={rss_mib:.1f} MiB"
+        sly.logger.info(msg)
+    except Exception:
+        # Never fail the pipeline due to diagnostics.
+        pass
+
+
 def pull_cache(
     team_id: int, project_id: int, tf_project_dir: str, project_fs_dir: str
 ) -> Tuple[bool, dict]:
@@ -157,7 +178,10 @@ def push_cache(
 
 @sly.timeit
 def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
-    return {d.id: g.api.image.get_list(d.id) for d in datasets}
+    log_ram("before get_project_images_all")
+    res = {d.id: g.api.image.get_list(d.id) for d in datasets}
+    log_ram("after get_project_images_all")
+    return res
 
 
 @sly.timeit
@@ -169,6 +193,7 @@ def get_updated_images_and_classes(
     force_stats_recalc: bool,
     _cache: dict,
 ) -> Tuple[List[ImageInfo], List[str]]:
+    log_ram("before get_updated_images_and_classes")
     _images_cached = _cache.get("images", {})
     _meta_cached_json = _cache.get("meta")
     _project_meta_cached = ProjectMeta.from_json(_meta_cached_json) if _meta_cached_json else None
@@ -245,6 +270,7 @@ def get_updated_images_and_classes(
     elif num_updated > 0:
         sly.logger.log(g._INFO, f"The changes in {num_updated} images detected")
 
+    log_ram("after get_updated_images_and_classes")
     return updated_images, updated_classes, _cache, is_meta_changed
 
 
@@ -379,6 +405,7 @@ def download_stats_chunks_to_buffer(
     project_fs_dir,
     force_stats_recalc,
 ) -> bool:
+    log_ram("enter download_stats_chunks_to_buffer")
     if force_stats_recalc:
         return True
 
@@ -425,6 +452,7 @@ def download_stats_chunks_to_buffer(
     with tarfile.open(dst_path, "r:gz") as tar:
         tar.extractall(project_fs_dir)
 
+    log_ram("exit download_stats_chunks_to_buffer")
     return False
 
 
@@ -444,12 +472,15 @@ def calculate_stats_and_save_chunks(
     total_updated = sum(len(lst) for lst in updated_images.values())
     total_updated_figures = sum(x.labels_count for lst in updated_images.values() for x in lst)
     sly.logger.log(g._INFO, f"Start calculating stats for {total_updated} images.")
+    log_ram("before calculate_stats_and_save_chunks loop")
     with tqdm(desc="Calculating stats", total=total_updated) as pbar:
 
         for dataset_id, images in updated_images.items():
+            log_ram(f"stats dataset_id={dataset_id} start")
             updated_chunks = list(set([image_to_chunk[image.id] for image in images]))
 
             for chunk in updated_chunks:
+                log_ram(f"stats chunk={chunk} start")
                 images_chunk = chunk_to_images[chunk]
 
                 for batch_infos in sly.batched(images_chunk, 100):
@@ -476,10 +507,13 @@ def calculate_stats_and_save_chunks(
                 for stat in stats:
                     save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime)
                     stat.clean()
+                log_ram(f"stats chunk={chunk} end")
+            log_ram(f"stats dataset_id={dataset_id} end")
 
         # if pbar.last_print_n < pbar.total:  # unlabeled images
         #     pbar.update(pbar.total - pbar.n)
 
+    log_ram("after calculate_stats_and_save_chunks loop")
     return heatmaps_image_ids, heatmaps_figure_ids
 
 
@@ -571,10 +605,12 @@ def calculate_and_upload_heatmaps(
     add_heatmaps_status_in_progress(team, tf_project_dir, project_fs_dir)
 
     try:
+        log_ram("heatmaps start")
         sample_total = sum(len(lst) for lst in heatmaps_image_ids.values())
         with tqdm(desc="Calculating heatmaps from sample", total=sample_total) as pbar:
 
             for dataset_id, image_ids in heatmaps_image_ids.items():
+                log_ram(f"heatmaps dataset_id={dataset_id} start")
                 image_infos = g.api.image.get_info_by_id_batch(list(image_ids))
 
                 for batch_infos in sly.batched(image_infos, 100):
@@ -586,6 +622,7 @@ def calculate_and_upload_heatmaps(
                         filtered = [x for x in figs if x.id in heatmaps_figure_ids[x.class_id]]
                         heatmaps.update2(image, filtered, skip_broken_geometry=True)
                         pbar.update(1)
+                log_ram(f"heatmaps dataset_id={dataset_id} end")
 
         heatmaps_name = f"{heatmaps.basename_stem}.png"
         fs_heatmap_path = f"{project_fs_dir}/{heatmaps_name}"
@@ -595,6 +632,7 @@ def calculate_and_upload_heatmaps(
         g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
         sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
         add_heatmaps_status_ok(team, tf_project_dir, project_fs_dir)
+        log_ram("heatmaps end")
 
     except Exception as e:
         # If heatmaps calculation fails, remove in_progress marker
@@ -687,6 +725,8 @@ def archive_chunks_and_upload(
     project_fs_dir,
     datasets,
 ):
+    log_ram("enter archive_chunks_and_upload")
+
     def _compress_folders(folders, archive_path) -> int:
         with tarfile.open(archive_path, "w:gz") as tar:
             for folder in folders:
@@ -699,6 +739,7 @@ def archive_chunks_and_upload(
     archive_name = f"{project.id}_{project.name}_chunks_{dt_identifier.isoformat()}.tar.gz"
     src_path = f"{project_fs_dir}/{archive_name}"
     archive_sizeb = _compress_folders(folders_to_compress, src_path)
+    log_ram("after compress archive_chunks_and_upload")
 
     dst_path = f"{tf_project_dir}/{archive_name}"
     with tqdm(
@@ -708,9 +749,11 @@ def archive_chunks_and_upload(
         unit_scale=True,
     ) as pbar:
         g.api.file.upload(team.id, src_path, dst_path, progress_cb=pbar)
+    log_ram("after upload archive_chunks_and_upload")
 
     remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
     sly.logger.log(g._INFO, f"The '{archive_name}' file was succesfully uploaded.")
+    log_ram("exit archive_chunks_and_upload")
 
 
 @sly.timeit

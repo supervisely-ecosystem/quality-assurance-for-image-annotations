@@ -237,27 +237,36 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
 def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
 
     g.initialize_log_levels(project.id)
+    u.log_ram("main_func start (after initialize_log_levels)")
 
     # This will wait in queue if project is busy, then acquire lock when available
     active_project_path_tf = check_if_QA_tab_is_active(team, project)
+    u.log_ram("after check_if_QA_tab_is_active")
 
     sly.logger.log(g._INFO, "Start Quality Assurance.")
+    u.log_ram("after Start Quality Assurance log")
 
     tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
     project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
+    u.log_ram("after paths computed")
 
     force_stats_recalc = False
     force_heatmaps_recalc = False
     force_stats_recalc, _cache = u.pull_cache(team.id, project.id, tf_project_dir, project_fs_dir)
+    u.log_ram("after pull_cache")
 
     json_project_meta = g.api.project.get_meta(project.id)
+    u.log_ram("after project.get_meta")
     try:
         project_meta = sly.ProjectMeta.from_json(json_project_meta)
     except Exception:
         json_project_meta = u.handle_broken_project_meta(json_project_meta)
         project_meta = sly.ProjectMeta.from_json(json_project_meta)
+    u.log_ram("after ProjectMeta.from_json")
     datasets = g.api.dataset.get_list(project.id, recursive=True)
+    u.log_ram("after dataset.get_list")
     project_stats = g.api.project.get_stats(project.id)
+    u.log_ram("after project.get_stats")
 
     sly.logger.log(g._INFO, f"Processing for the '{project.name}' project")
     sly.logger.log(
@@ -287,8 +296,10 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         dtools.TagsImagesOneOfDistribution(project_meta),
         dtools.TagsObjectsOneOfDistribution(project_meta),
     ]
+    u.log_ram("after stats objects created")
 
     heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
+    u.log_ram("after heatmaps object created")
 
     if sly.fs.dir_exists(project_fs_dir):
         # Additional check before cleaning to prevent conflicts with concurrent processes
@@ -318,6 +329,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
             sly.logger.log(g._WARNING, f"Error handling directory lock: {e}")
             # Continue even if lock failed to avoid blocking the entire process
     os.makedirs(project_fs_dir, exist_ok=True)
+    u.log_ram("after buffer dir prepared")
 
     if g.api.file.dir_exists(team.id, tf_project_dir):
         mandatory_class_stats = (
@@ -357,9 +369,11 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                     )
 
     images_all_dct = u.get_project_images_all(datasets)
+    u.log_ram("after images_all_dct created in main")
     updated_images, updated_classes, _cache, is_meta_changed = u.get_updated_images_and_classes(
         project, project_meta, datasets, images_all_dct, force_stats_recalc, _cache
     )
+    u.log_ram("after get_updated_images_and_classes in main")
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0 and not is_meta_changed:
         sly.logger.log(g._INFO, "Nothing to update. Skipping stats calculation...")
@@ -435,6 +449,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         force_stats_recalc = u.download_stats_chunks_to_buffer(
             team.id, project, tf_project_dir, project_fs_dir, force_stats_recalc
         )
+        u.log_ram("after download_stats_chunks_to_buffer")
         # When recalculating stats, also mark heatmaps for recalculation
         if force_stats_recalc:
             force_heatmaps_recalc = True
@@ -461,6 +476,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         g.api.file.remove(team.id, tf_status_in_progress)
 
     idx_to_infos, infos_to_idx = u.get_indexes_dct(project.id, datasets, images_all_dct)
+    u.log_ram("after get_indexes_dct")
     updated_images = u.check_idxs_integrity(
         project,
         datasets,
@@ -471,8 +487,10 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         images_all_dct,
         force_stats_recalc,
     )
+    u.log_ram("after check_idxs_integrity")
 
     tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]
+    u.log_ram("after list2 tf_all_paths")
 
     heatmaps_image_ids, heatmaps_figure_ids = u.calculate_stats_and_save_chunks(
         updated_images,
@@ -484,11 +502,16 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         project_stats,
         project,
     )
+    u.log_ram("after calculate_stats_and_save_chunks")
     sly.logger.log(g._INFO, "Stats calculation finished.")
+    u.log_ram("after Stats calculation finished log")
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
+    u.log_ram("after remove_junk")
     u.sew_chunks_to_json(stats, project_fs_dir, updated_classes, is_meta_changed)
+    u.log_ram("after sew_chunks_to_json")
 
     sly.logger.log(g._INFO, "Start threading of 'calculate_and_save_heatmaps'")
+    u.log_ram("before starting heatmaps thread")
     thread1 = threading.Thread(
         target=u.calculate_and_upload_heatmaps,
         args=(
@@ -501,35 +524,45 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         ),
     )
     thread1.start()
+    u.log_ram("after starting heatmaps thread")
 
     sly.logger.log(g._INFO, "Start threading of 'archive_chunks_and_upload'")
+    u.log_ram("before starting archive thread")
     thread2 = threading.Thread(
         target=u.archive_chunks_and_upload,
         args=(team, project, stats, tf_project_dir, project_fs_dir, datasets),
     )
     thread2.start()
+    u.log_ram("after starting archive thread")
 
     u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
+    u.log_ram("after upload_sewed_stats")
     u.push_cache(team.id, project.id, tf_project_dir, project_fs_dir, _cache)
+    u.log_ram("after push_cache")
 
     # Wait only for archive thread (thread2) to complete before releasing the lock
     # Heatmaps thread (thread1) can continue in background - next request will wait for it if needed
     sly.logger.log(g._INFO, "Waiting for archive thread to complete...")
+    u.log_ram("before thread2.join")
     thread2.join()
     sly.logger.log(g._INFO, "Archive thread completed")
+    u.log_ram("after thread2.join")
 
     # Clean up lock file after stats processing is complete
     # Heatmaps thread continues in background
     lock_file_path = f"{project_fs_dir}/.processing.lock"
     sly.fs.silent_remove(lock_file_path)
+    u.log_ram("after removing .processing.lock")
 
     # Release the project lock - stats are ready, heatmaps will be calculated in background
     if isinstance(active_project_path_tf, str):
         g.api.file.remove(team.id, active_project_path_tf)
+    u.log_ram("after releasing project lock")
 
     sly.logger.log(
         g._INFO, "Stats calculation completed. Heatmaps are being calculated in background."
     )
+    u.log_ram("main_func end")
     return JSONResponse(
         {"message": f"The statistics were updated: {total_updated} images were calculated"}
     )
