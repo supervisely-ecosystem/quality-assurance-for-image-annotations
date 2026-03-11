@@ -533,6 +533,10 @@ def sew_chunks_to_json(
 
         res = stat.to_json2()
         if res is not None:
+            if isinstance(res, dict) and isinstance(res.get("columnsOptions"), list):
+                res["columnsOptions"] = [
+                    ({} if opt is None else opt) for opt in res["columnsOptions"]
+                ]
             _save_to_json(res, f"{project_fs_dir}/{stat.basename_stem}.json")
 
 
