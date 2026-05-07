@@ -1,4 +1,5 @@
-git+https://github.com/supervisely/dataset-tools.git@heatmap-status-endpoint
+# heatmap-status-endpoint branch commit with dataset_tools.repo.heatmap_status.
+git+https://github.com/supervisely/dataset-tools.git@49a092c14852f6edc2f04fc75f0e307e1ffa7375#egg=dataset-tools
 ujson
 scikit-image==0.21.0
 Pillow==9.5.0
