@@ -160,6 +160,37 @@ def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
     return {d.id: g.api.image.get_list(d.id) for d in datasets}
 
 
+def _normalize_image_tags(tags) -> list:
+    normalized = []
+    for tag in tags or []:
+        if isinstance(tag, dict):
+            normalized.append(
+                {
+                    "tagId": tag.get("tagId"),
+                    "value": tag.get("value"),
+                }
+            )
+        else:
+            normalized.append(
+                {
+                    "tagId": getattr(tag, "tag_id", getattr(tag, "sly_id", None)),
+                    "value": getattr(tag, "value", None),
+                }
+            )
+    return sorted(normalized, key=lambda x: (str(x["tagId"]), str(x["value"])))
+
+
+def _get_image_cache_record(image: ImageInfo) -> dict:
+    return {
+        "updated_at": image.updated_at,
+        "tags": _normalize_image_tags(getattr(image, "tags", None)),
+    }
+
+
+def _is_legacy_image_cache(images_cache: dict) -> bool:
+    return any(not isinstance(value, dict) or "tags" not in value for value in images_cache.values())
+
+
 @sly.timeit
 def get_updated_images_and_classes(
     project: ProjectInfo,
@@ -173,24 +204,34 @@ def get_updated_images_and_classes(
     _meta_cached_json = _cache.get("meta")
     _project_meta_cached = ProjectMeta.from_json(_meta_cached_json) if _meta_cached_json else None
     is_meta_changed = compare_metas(project_meta, _project_meta_cached)
+    is_legacy_image_cache = _is_legacy_image_cache(_images_cached)
 
     updated_images, updated_classes = {d.id: [] for d in datasets}, {}
-    if len(project_meta.obj_classes.items()) == 0:
-        sly.logger.log(g._INFO, "The project is fully unlabeled")
-        return {}, {}, {}, is_meta_changed
-
     images_all_flat = []
     for value in images_all_dct.values():
         images_all_flat.extend(value)
 
-    images_updated_at = {}
+    images_cache = {}
+    has_image_tags = False
     for image in images_all_flat:
-        images_updated_at[image.id] = image.updated_at
+        images_cache[image.id] = _get_image_cache_record(image)
+        has_image_tags = has_image_tags or len(images_cache[image.id]["tags"]) > 0
 
-    _cache["images"] = images_updated_at
+    _cache["images"] = images_cache
     _cache["meta"] = project_meta.to_json()
 
+    if len(project_meta.obj_classes.items()) == 0 and not has_image_tags:
+        sly.logger.log(g._INFO, "The project is fully unlabeled")
+        return {}, {}, _cache, is_meta_changed
+
     if force_stats_recalc is True:
+        return images_all_dct, {}, _cache, is_meta_changed
+
+    if is_legacy_image_cache is True:
+        sly.logger.log(
+            g._INFO,
+            "The cached image state has no image tag signatures. Recalculating full statistics...",
+        )
         return images_all_dct, {}, _cache, is_meta_changed
 
     if _project_meta_cached is not None:
@@ -220,8 +261,8 @@ def get_updated_images_and_classes(
     for image in images_all_flat:
         try:
             image: ImageInfo
-            cached_updated_at = _images_cached[image.id]
-            if image.updated_at != cached_updated_at:
+            cached_image_record = _images_cached[image.id]
+            if images_cache[image.id] != cached_image_record:
                 updated_images[image.dataset_id].append(image)
         except KeyError:
             updated_images[image.dataset_id].append(image)
