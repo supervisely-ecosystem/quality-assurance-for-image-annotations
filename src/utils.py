@@ -180,17 +180,11 @@ def get_updated_images_and_classes(
 
     updated_images, updated_classes = {d.id: [] for d in datasets}, {}
     images_updated_at = {}
-    has_image_tags = False
     for image in images_all_flat:
         images_updated_at[image.id] = image.updated_at
-        has_image_tags = has_image_tags or len(getattr(image, "tags", None) or []) > 0
 
     _cache["images"] = images_updated_at
     _cache["meta"] = project_meta.to_json()
-
-    if len(project_meta.obj_classes.items()) == 0 and not has_image_tags:
-        sly.logger.log(g._INFO, "The project is fully unlabeled")
-        return {}, {}, _cache, is_meta_changed
 
     if force_stats_recalc is True:
         return images_all_dct, {}, _cache, is_meta_changed
