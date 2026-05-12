@@ -160,6 +160,22 @@ def get_project_images_all(datasets: List[DatasetInfo]) -> Dict[int, ImageInfo]:
     return {d.id: g.api.image.get_list(d.id) for d in datasets}
 
 
+def get_changed_object_class_ids(
+    project_meta: ProjectMeta, _project_meta_cached: Union[ProjectMeta, dict]
+) -> Set[int]:
+    if _project_meta_cached is None:
+        return set()
+
+    cached = {x.sly_id: x.name for x in _project_meta_cached.obj_classes}
+    actual = {x.sly_id: x.name for x in project_meta.obj_classes}
+
+    removed_ids = set(cached) - set(actual)
+    renamed_ids = {
+        class_id for class_id in set(cached) & set(actual) if cached[class_id] != actual[class_id]
+    }
+    return removed_ids | renamed_ids
+
+
 @sly.timeit
 def get_updated_images_and_classes(
     project: ProjectInfo,
@@ -168,7 +184,7 @@ def get_updated_images_and_classes(
     images_all_dct,
     force_stats_recalc: bool,
     _cache: dict,
-) -> Tuple[List[ImageInfo], List[str]]:
+) -> Tuple[Dict[int, List[ImageInfo]], Set[int], dict, bool]:
     _images_cached = _cache.get("images", {})
     _meta_cached_json = _cache.get("meta")
     _project_meta_cached = ProjectMeta.from_json(_meta_cached_json) if _meta_cached_json else None
@@ -183,6 +199,7 @@ def get_updated_images_and_classes(
     for value in images_all_dct.values():
         images_all_flat.extend(value)
 
+    updated_images, changed_object_class_ids = {d.id: [] for d in datasets}, set()
     images_updated_at = {}
     for image in images_all_flat:
         images_updated_at[image.id] = image.updated_at
@@ -191,28 +208,14 @@ def get_updated_images_and_classes(
     _cache["meta"] = project_meta.to_json()
 
     if force_stats_recalc is True:
-        return images_all_dct, {}, _cache, is_meta_changed
+        return images_all_dct, set(), _cache, is_meta_changed
 
     if _project_meta_cached is not None:
-        cached_classes = _project_meta_cached.obj_classes
-        if len(cached_classes) != len(project_meta.obj_classes):
-            cached = {x.sly_id: x.name for x in cached_classes}
-            actual = {x.sly_id: x.name for x in project_meta.obj_classes}
-            cached_ids = set(cached.keys())
-            actual_ids = set(actual.keys())
-
-            updated_ids = actual_ids.symmetric_difference(cached_ids)
-
-            def _func(pair):
-                id, name = pair
-                return True if id in updated_ids else False
-
-            for dct in [cached, actual]:
-                updated_classes.update(dict(filter(_func, dct.items())))
-
+        changed_object_class_ids = get_changed_object_class_ids(project_meta, _project_meta_cached)
+        if len(changed_object_class_ids) > 0:
             sly.logger.log(
                 g._INFO,
-                f"Changes in the number of classes detected: {list(updated_classes.values())}",
+                f"Object class metadata changes detected for class IDs: {sorted(changed_object_class_ids)}",
             )
 
     set_A, set_B = set(_images_cached), set([i.id for i in images_all_flat])
@@ -237,7 +240,7 @@ def get_updated_images_and_classes(
             )
 
         sly.logger.log(g._INFO, "Recalculate full statistics")
-        return images_all_dct, {}, _cache, is_meta_changed
+        return images_all_dct, set(), _cache, is_meta_changed
 
     num_updated = sum(len(lst) for lst in updated_images.values())
     if num_updated == getattr(project, "items_count", 0):
@@ -245,7 +248,7 @@ def get_updated_images_and_classes(
     elif num_updated > 0:
         sly.logger.log(g._INFO, f"The changes in {num_updated} images detected")
 
-    return updated_images, updated_classes, _cache, is_meta_changed
+    return updated_images, changed_object_class_ids, _cache, is_meta_changed
 
 
 @sly.timeit
@@ -307,6 +310,85 @@ def check_idxs_integrity(
             return images_all_dct
 
     return updated_images
+
+
+def add_changed_class_chunks_to_updated_images(
+    updated_images: Dict[int, List[ImageInfo]],
+    changed_object_class_ids: Set[int],
+    project_fs_dir: str,
+    chunk_to_images: Dict[str, List[ImageInfo]],
+    image_to_chunk: Dict[int, str],
+    images_all_dct: Dict[int, List[ImageInfo]],
+) -> Tuple[Dict[int, List[ImageInfo]], int, bool]:
+    if len(changed_object_class_ids) == 0:
+        return updated_images, 0, False
+
+    class_balance_dir = f"{project_fs_dir}/class_balance"
+
+    try:
+        if not sly.fs.dir_exists(class_balance_dir):
+            raise FileNotFoundError(
+                f"Class balance chunks directory not found: {class_balance_dir}"
+            )
+
+        files = list_files(class_balance_dir, [".npy"])
+        if len(files) == 0:
+            raise FileNotFoundError(f"Class balance chunk files not found: {class_balance_dir}")
+
+        affected_chunks = set()
+        for file in files:
+            loaded_data = np.load(file, allow_pickle=True).tolist()
+            if loaded_data is None:
+                continue
+            if (
+                not isinstance(loaded_data, (list, tuple))
+                or len(loaded_data) == 0
+                or not isinstance(loaded_data[0], dict)
+            ):
+                raise ValueError(f"Unexpected class balance chunk format: {file}")
+
+            images_by_class = loaded_data[0]
+            for class_id in changed_object_class_ids:
+                for image_id in images_by_class.get(class_id, set()):
+                    chunk = image_to_chunk.get(image_id)
+                    if chunk is None:
+                        raise KeyError(
+                            f"Image ID={image_id} from class balance chunk is missing in current indexes"
+                        )
+                    affected_chunks.add(chunk)
+
+        if len(affected_chunks) == 0:
+            sly.logger.log(
+                g._INFO,
+                "Object class metadata changed, but affected classes were not found in cached chunks.",
+            )
+            return updated_images, 0, False
+
+        existing_image_ids = {image.id for images in updated_images.values() for image in images}
+        added_images = 0
+        for chunk in affected_chunks:
+            images_chunk = chunk_to_images.get(chunk)
+            if images_chunk is None:
+                raise KeyError(f"Chunk {chunk!r} is missing in current indexes")
+            for image in images_chunk:
+                if image.id in existing_image_ids:
+                    continue
+                updated_images.setdefault(image.dataset_id, []).append(image)
+                existing_image_ids.add(image.id)
+                added_images += 1
+
+        sly.logger.log(
+            g._INFO,
+            f"Object class metadata changed. Recalculating {len(affected_chunks)} affected chunks ({added_images} additional images).",
+        )
+        return updated_images, len(affected_chunks), False
+
+    except Exception as e:
+        sly.logger.log(
+            g._WARNING,
+            f"Failed to resolve chunks affected by object class metadata changes: {repr(e)}. Recalculating full statistics.",
+        )
+        return images_all_dct, len(chunk_to_images), True
 
 
 def check_datasets_consistency(project_info, datasets, npy_paths, num_stats):
@@ -517,7 +599,7 @@ def save_chunks(stat, chunk, project_fs_dir, tf_all_paths, latest_datetime):
 
 @sly.timeit
 def sew_chunks_to_json(
-    stats: List[BaseStats], project_fs_dir, updated_classes, is_meta_changed: bool
+    stats: List[BaseStats], project_fs_dir, _changed_object_class_ids, is_meta_changed: bool
 ):
     # @sly.timeit
     def _save_to_json(res, dst_path):

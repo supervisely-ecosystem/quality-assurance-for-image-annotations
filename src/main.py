@@ -357,7 +357,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                     )
 
     images_all_dct = u.get_project_images_all(datasets)
-    updated_images, updated_classes, _cache, is_meta_changed = u.get_updated_images_and_classes(
+    updated_images, changed_object_class_ids, _cache, is_meta_changed = u.get_updated_images_and_classes(
         project, project_meta, datasets, images_all_dct, force_stats_recalc, _cache
     )
     total_updated = sum(len(lst) for lst in updated_images.values())
@@ -472,6 +472,34 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         force_stats_recalc,
     )
 
+    total_updated = sum(len(lst) for lst in updated_images.values())
+    is_full_stats_recalc = force_stats_recalc or (
+        getattr(project, "items_count", None) is not None
+        and total_updated == project.items_count
+    )
+    if not is_full_stats_recalc:
+        updated_images, meta_affected_chunks, force_full_from_meta = (
+            u.add_changed_class_chunks_to_updated_images(
+                updated_images,
+                changed_object_class_ids,
+                project_fs_dir,
+                idx_to_infos,
+                infos_to_idx,
+                images_all_dct,
+            )
+        )
+        if force_full_from_meta:
+            force_stats_recalc = True
+
+        if meta_affected_chunks > 0 or force_full_from_meta:
+            force_heatmaps_recalc = True
+            tf_status_ok = f"{tf_project_dir}/_cache/heatmaps/status_ok"
+            tf_status_in_progress = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
+            g.api.file.remove(team.id, tf_status_ok)
+            g.api.file.remove(team.id, tf_status_in_progress)
+
+    total_updated = sum(len(lst) for lst in updated_images.values())
+
     tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]
 
     heatmaps_image_ids, heatmaps_figure_ids = u.calculate_stats_and_save_chunks(
@@ -486,7 +514,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
     )
     sly.logger.log(g._INFO, "Stats calculation finished.")
     u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
-    u.sew_chunks_to_json(stats, project_fs_dir, updated_classes, is_meta_changed)
+    u.sew_chunks_to_json(stats, project_fs_dir, changed_object_class_ids, is_meta_changed)
 
     sly.logger.log(g._INFO, "Start threading of 'calculate_and_save_heatmaps'")
     thread1 = threading.Thread(
