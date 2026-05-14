@@ -1,1 +1,0 @@
--e git+https://github.com/supervisely/dataset-tools.git@feat/set-image-tags-as-annotated#egg=dataset-tools
