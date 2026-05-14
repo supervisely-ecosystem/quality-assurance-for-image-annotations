@@ -1,5 +1,6 @@
+# git+https://github.com/supervisely/supervisely.git@some-branch
 supervisely==6.73.564
-dataset-tools==0.1.9
+dataset-tools==0.2.0
 humanize
 ujson
 scikit-image==0.21.0
