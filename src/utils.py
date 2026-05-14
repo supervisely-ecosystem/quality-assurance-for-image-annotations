@@ -174,15 +174,11 @@ def get_updated_images_and_classes(
     _project_meta_cached = ProjectMeta.from_json(_meta_cached_json) if _meta_cached_json else None
     is_meta_changed = compare_metas(project_meta, _project_meta_cached)
 
-    updated_images, updated_classes = {d.id: [] for d in datasets}, {}
-    if len(project_meta.obj_classes.items()) == 0:
-        sly.logger.log(g._INFO, "The project is fully unlabeled")
-        return {}, {}, {}, is_meta_changed
-
     images_all_flat = []
     for value in images_all_dct.values():
         images_all_flat.extend(value)
 
+    updated_images, updated_classes = {d.id: [] for d in datasets}, {}
     images_updated_at = {}
     for image in images_all_flat:
         images_updated_at[image.id] = image.updated_at
