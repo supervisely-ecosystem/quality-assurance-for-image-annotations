@@ -3,6 +3,6 @@ supervisely==6.73.564
 dataset-tools==0.2.2
 humanize
 ujson
-scikit-image==0.21.0
+scikit-image==0.25.0
 Pillow>=10.4.0
 pandas>=2.0.0
