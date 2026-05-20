@@ -7,8 +7,15 @@ on:
       - main
       - master
 jobs:
+  build-image:
+    if: "!github.event.release.prerelease"
+    uses: supervisely-ecosystem/workflows/.github/workflows/build_image_from_template.yml@master
+    with:
+      image_name: "${{ github.event.repository.name }}"
+      cve_checks: true
   Supervisely-Release:
     if: "!github.event.release.prerelease"
+    needs: build-image
     uses: supervisely-ecosystem/workflows/.github/workflows/common.yml@master
     secrets:
       SUPERVISELY_DEV_API_TOKEN: "${{ secrets.SUPERVISELY_DEV_API_TOKEN }}"
@@ -22,4 +29,4 @@ jobs:
       RELEASE_VERSION: "${{ github.event.release.tag_name }}"
       RELEASE_DESCRIPTION: "${{ github.event.release.name }}"
       RELEASE_TYPE: "release"
-      SUBAPP_PATHS: "__ROOT_APP__"
+      SUBAPP_PATHS: "split, merge"
