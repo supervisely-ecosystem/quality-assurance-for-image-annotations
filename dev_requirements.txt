@@ -1,5 +1,5 @@
 # git+https://github.com/supervisely/supervisely.git@some-branch
-supervisely==6.14.13
+supervisely==6.74.13
 dataset-tools==0.2.3
 humanize
 ujson
