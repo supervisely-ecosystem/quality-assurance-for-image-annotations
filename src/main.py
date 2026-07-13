@@ -8,7 +8,9 @@ from dataset_tools.repo.heatmap_status import HeatmapStatusReporter
 from datetime import datetime, timezone
 import time
 import threading
-from pathlib import Path
+from dataclasses import dataclass
+from tempfile import TemporaryDirectory
+from uuid import uuid4
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from supervisely.app.widgets import Container
@@ -17,12 +19,79 @@ import fcntl
 
 
 layout = Container(widgets=[card_1], direction="vertical")
-static_dir = Path(g.STORAGE_DIR)
-app = sly.Application(layout=layout, static_dir=static_dir)
+app = sly.Application(layout=layout)
 server = app.get_server()
 
 
-TIMELOCK_LIMIT = 60  # seconds
+TIMELOCK_LIMIT = 180  # seconds
+LOCK_HEARTBEAT_INTERVAL = 30  # seconds
+
+
+@dataclass(frozen=True)
+class _ActiveRequestLock:
+    project_id: int
+    local_path: str
+    tf_path: str
+    content_hash: str
+
+
+class _ActiveRequestHeartbeat:
+    def __init__(self, team_id: int, lock: _ActiveRequestLock):
+        self._team_id = team_id
+        self._lock = lock
+        self._stop_event = threading.Event()
+        self._started = False
+        self._ownership_error = None
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"stats-lock-heartbeat-{lock.project_id}",
+            daemon=True,
+        )
+
+    def start(self):
+        self._thread.start()
+        self._started = True
+
+    def stop(self):
+        self._stop_event.set()
+        if self._started:
+            self._thread.join()
+
+    def _refresh_lock(self):
+        self.ensure_owned()
+        uploaded = g.api.file.upload(
+            self._team_id,
+            self._lock.local_path,
+            self._lock.tf_path,
+        )
+        if uploaded.hash != self._lock.content_hash:
+            raise u.ActiveRequestOwnershipError(
+                f"Active request lock {self._lock.tf_path!r} changed during refresh"
+            )
+        self.ensure_owned()
+
+    def ensure_owned(self):
+        if self._ownership_error is not None:
+            raise self._ownership_error
+        current = g.api.file.get_info_by_path(self._team_id, self._lock.tf_path)
+        if current is None or current.hash != self._lock.content_hash:
+            raise u.ActiveRequestOwnershipError(
+                f"Active request lock {self._lock.tf_path!r} is no longer owned by this run"
+            )
+
+    def _run(self):
+        while not self._stop_event.wait(LOCK_HEARTBEAT_INTERVAL):
+            try:
+                self._refresh_lock()
+            except u.ActiveRequestOwnershipError as e:
+                self._ownership_error = e
+                self._stop_event.set()
+                sly.logger.error(str(e))
+                return
+            except Exception as e:
+                sly.logger.warning(
+                    f"Failed to refresh active request lock {self._lock.tf_path!r}: {e}"
+                )
 
 
 def _get_extra(user_id, team, workspace, project) -> dict:
@@ -59,42 +128,6 @@ def stats_endpoint(project_id: int, user_id: int = None):
         xtr = _get_extra(user_id, team, workspace, project)
         sly.logger.error(msg, extra=xtr)
 
-        active_project_path = f"{g.ACTIVE_REQUESTS_DIR}/{project_id}"
-        active_project_path_tf = f"{g.TF_ACTIVE_REQUESTS_DIR}/{project_id}"
-        sly.fs.silent_remove(active_project_path)
-
-        # Clean up resources if project info is available
-        if project is not None:
-            tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
-            project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
-
-            # Clean up lock file on error to prevent deadlock
-            lock_file_path = f"{project_fs_dir}/.processing.lock"
-            sly.fs.silent_remove(lock_file_path)
-
-            # Clean up team files if team info is available
-            if team is not None:
-                try:
-                    g.api.file.remove(team.id, active_project_path_tf)
-                except Exception as cleanup_error:
-                    sly.logger.warning(f"Failed to remove active project file: {cleanup_error}")
-
-                try:
-                    HeatmapStatusReporter(g.api, project.id, logger=sly.logger).failed(
-                        e,
-                        stage="stats",
-                        message="Statistics calculation failed before heatmap generation.",
-                    )
-                except Exception as cleanup_error:
-                    sly.logger.warning(f"Failed to update heatmaps status: {cleanup_error}")
-
-        elif team is not None:
-            # Only remove active project file if we have team but not project info
-            try:
-                g.api.file.remove(team.id, active_project_path_tf)
-            except Exception as cleanup_error:
-                sly.logger.warning(f"Failed to remove active project file: {cleanup_error}")
-
         raise HTTPException(
             status_code=500,
             detail={
@@ -123,17 +156,27 @@ def heatmaps_status_endpoint(project_id: int):
 
 
 def _remove_old_active_project_request(now, team, file):
-    if sly.is_development():
-        g.api.file.remove(team.id, file.path)
-    dt = datetime.fromisoformat(file.updated_at[:-1]).replace(tzinfo=timezone.utc)
-    if (now - dt).seconds > TIMELOCK_LIMIT:
+    updated_at = file.updated_at
+    if isinstance(updated_at, str) and updated_at.endswith("Z"):
+        updated_at = updated_at[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(updated_at)
+    except (TypeError, ValueError):
+        sly.logger.warning(
+            f"Cannot parse updated_at for active request {file.path!r}; keeping the lock."
+        )
+        return
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if (now - dt).total_seconds() > TIMELOCK_LIMIT:
         g.api.file.remove(team.id, file.path)
         sly.logger.debug(
-            f"The temporary file {file.path!r} has been removed from tf because of time limit ({TIMELOCK_LIMIT} secs). TEAM_ID={team.id}"
+            f"The temporary file {file.path!r} has been removed from tf because of "
+            f"time limit ({TIMELOCK_LIMIT} secs). TEAM_ID={team.id}"
         )
 
 
-def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
+def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> _ActiveRequestLock:
     """
     Checks if the QA tab is active for the project and waits in queue if busy.
     Uses Team Files as the primary lock mechanism to prevent race conditions across multiple app instances.
@@ -154,7 +197,7 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
         project: ProjectInfo object containing project information
 
     Returns:
-        str: Path to the active project file in team files
+        _ActiveRequestLock: Owned lock metadata for heartbeat and safe release
     """
     sly.logger.log(g._INFO, "Checking requests...")
 
@@ -216,11 +259,13 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
                 # No locks exist - we can proceed!
                 # Create the lock file locally
                 with open(active_project_path_local, "w") as request_file:
-                    request_file.write(f"Started at: {datetime.now(timezone.utc).isoformat()}")
+                    request_file.write(uuid4().hex)
 
                 # Upload to Team Files - this becomes the global lock
                 try:
-                    g.api.file.upload(team.id, active_project_path_local, active_project_path_tf)
+                    uploaded = g.api.file.upload(
+                        team.id, active_project_path_local, active_project_path_tf
+                    )
                     sly.logger.log(g._INFO, f"Created active request file for project {project.id}")
                 except Exception as e:
                     sly.logger.warning(f"Failed to upload active request file: {e}")
@@ -230,8 +275,11 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
 
                 # Triple-check: verify our lock file was successfully created
                 file = g.api.file.get_info_by_path(team.id, active_project_path_tf)
-                if file is None:
-                    msg = f"Failed to create lock file for project {project.id}. Retrying..."
+                if file is None or file.hash != uploaded.hash:
+                    msg = (
+                        f"Failed to retain ownership of lock for project {project.id}. "
+                        "Retrying..."
+                    )
                     sly.logger.warning(msg)
                     sly.fs.silent_remove(active_project_path_local)
                     time.sleep(2)
@@ -247,7 +295,12 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
 
                 sly.fs.silent_remove(lock_file_path)
                 sly.logger.log(g._INFO, "Finish checking if 'QA & Stats' tab is active.")
-                return active_project_path_tf
+                return _ActiveRequestLock(
+                    project_id=project.id,
+                    local_path=active_project_path_local,
+                    tf_path=active_project_path_tf,
+                    content_hash=uploaded.hash,
+                )
 
         except Exception as e:
             sly.logger.error(f"Error in check_if_QA_tab_is_active: {e}")
@@ -256,43 +309,136 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> str:
             raise
 
 
-def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
-
-    g.initialize_log_levels(project.id)
-
-    # This will wait in queue if project is busy, then acquire lock when available
-    active_project_path_tf = check_if_QA_tab_is_active(team, project)
-
-    sly.logger.log(g._INFO, "Start Quality Assurance.")
-
-    tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
-    project_fs_dir = f"{g.STORAGE_DIR}/{project.id}_{project.name}"
-
-    force_stats_recalc = False
-    force_heatmaps_recalc = False
-    force_stats_recalc, _cache = u.pull_cache(team.id, project.id, tf_project_dir, project_fs_dir)
-
-    json_project_meta = g.api.project.get_meta(project.id)
+def _release_active_project_request(team_id: int, lock: _ActiveRequestLock):
     try:
-        project_meta = sly.ProjectMeta.from_json(json_project_meta)
-    except Exception:
-        json_project_meta = u.handle_broken_project_meta(json_project_meta)
-        project_meta = sly.ProjectMeta.from_json(json_project_meta)
-    datasets = g.api.dataset.get_list(project.id, recursive=True)
-    project_stats = g.api.project.get_stats(project.id)
+        current = g.api.file.get_info_by_path(team_id, lock.tf_path)
+        if current is None:
+            return
+        if current.hash != lock.content_hash:
+            sly.logger.warning(
+                f"Not removing active request lock {lock.tf_path!r}: ownership changed."
+            )
+            return
+        g.api.file.remove(team_id, lock.tf_path)
+    finally:
+        sly.fs.silent_remove(lock.local_path)
 
-    sly.logger.log(g._INFO, f"Processing for the '{project.name}' project")
-    sly.logger.log(
-        g._INFO,
-        f"with the USER_ID={user_id} TEAM_ID={team.id} WORKSPACE_ID={workspace.id} PROJECT_ID={project.id}",
-    )
-    sly.logger.log(g._INFO, f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
-    sly.logger.log(
-        g._INFO,
-        f"The project consists of {project.items_count} images and has {project.datasets_count} datasets",
+
+def _get_heatmap_state(team_id: int, project_id: int, tf_project_dir: str, heatmaps):
+    if not g.api.file.dir_exists(team_id, tf_project_dir):
+        return False, "missing"
+
+    heatmaps_path = f"{tf_project_dir}/{heatmaps.basename_stem}.png"
+    status = dtools.heatmap_status_endpoint(g.api, project_id)
+    heatmap_exists = g.api.file.exists(team_id, heatmaps_path)
+    if status["status"] == "skipped" and heatmap_exists:
+        g.api.file.remove(team_id, heatmaps_path)
+        heatmap_exists = False
+    return heatmap_exists, status["status"]
+
+
+def _should_rebuild_heatmaps(stats_changed: bool, heatmap_exists: bool, heatmap_status: str):
+    if stats_changed:
+        return True
+    if heatmap_status in {"running", "skipped"}:
+        return False
+    if heatmap_status in {"failed", "stale", "unknown", "missing"}:
+        return True
+    return not heatmap_exists
+
+
+def _report_stats_failure_if_owned(project_id: int, error: Exception, ensure_owned):
+    try:
+        ensure_owned()
+        HeatmapStatusReporter(g.api, project_id, logger=sly.logger).failed(
+            error,
+            stage="stats",
+            message="Statistics calculation failed before heatmap generation.",
+        )
+    except u.ActiveRequestOwnershipError as ownership_error:
+        sly.logger.warning(
+            "Statistics failure status was not published after lock ownership changed: "
+            f"{ownership_error}"
+        )
+    except Exception as status_error:
+        sly.logger.warning(f"Failed to update heatmaps status: {status_error}")
+
+
+def _start_heatmap_thread(
+    team,
+    tf_project_dir,
+    project_id,
+    heatmaps,
+    heatmaps_image_ids,
+    heatmaps_figure_ids,
+    before_publish=None,
+    on_complete=None,
+):
+    if before_publish is not None:
+        before_publish()
+    HeatmapStatusReporter(g.api, project_id, logger=sly.logger).running(
+        "queued",
+        "Statistics are ready. Heatmap generation is queued.",
+        progress=0,
     )
 
-    stats = [
+    def run_heatmaps():
+        try:
+            u.calculate_and_upload_heatmaps(
+                team,
+                tf_project_dir,
+                g.STORAGE_DIR,
+                project_id,
+                heatmaps,
+                heatmaps_image_ids,
+                heatmaps_figure_ids,
+                before_publish,
+            )
+        finally:
+            if on_complete is not None:
+                on_complete()
+
+    thread = threading.Thread(target=run_heatmaps, name=f"heatmaps-{project_id}")
+    thread.start()
+    return thread
+
+
+def _publish_stats(
+    team,
+    project,
+    stats,
+    tf_project_dir,
+    project_fs_dir,
+    datasets,
+    cache,
+    run_state,
+    ensure_owned,
+):
+    ensure_owned()
+    u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
+    ensure_owned()
+    u.archive_chunks_and_upload(
+        team,
+        project,
+        stats,
+        tf_project_dir,
+        project_fs_dir,
+        datasets,
+        run_state,
+    )
+    ensure_owned()
+    u.push_cache(
+        team.id,
+        project.id,
+        tf_project_dir,
+        project_fs_dir,
+        cache,
+        run_state,
+    )
+
+
+def _build_stats(project_meta, project_stats, datasets):
+    return [
         dtools.OverviewPie(project_meta, project_stats),
         dtools.OverviewDonut(project_meta, project_stats),
         dtools.ClassBalance(project_meta, project_stats),
@@ -310,238 +456,300 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
         dtools.TagsObjectsOneOfDistribution(project_meta),
     ]
 
-    heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
 
-    if sly.fs.dir_exists(project_fs_dir):
-        # Additional check before cleaning to prevent conflicts with concurrent processes
-        lock_file_path = f"{project_fs_dir}/.processing.lock"
+def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: ProjectInfo):
+    g.initialize_log_levels(project.id)
+    active_request_lock = None
+    lock_heartbeat = None
+    lock_release_transferred = False
+    lock_released = False
+    lock_release_guard = threading.Lock()
+    report_heatmap_failure = False
+
+    def release_active_request():
+        nonlocal lock_released
+        with lock_release_guard:
+            if lock_released:
+                return
+            lock_released = True
+
+        if lock_heartbeat is not None:
+            lock_heartbeat.stop()
         try:
-            if os.path.exists(lock_file_path):
-                sly.logger.log(
-                    g._WARNING, f"Another process is working with {project_fs_dir}. Waiting..."
+            _release_active_project_request(team.id, active_request_lock)
+        except Exception as cleanup_error:
+            sly.logger.warning(
+                f"Failed to release active project request: {cleanup_error}"
+            )
+
+    try:
+        active_request_lock = check_if_QA_tab_is_active(team, project)
+        lock_heartbeat = _ActiveRequestHeartbeat(team.id, active_request_lock)
+        lock_heartbeat.start()
+        sly.logger.log(g._INFO, "Start Quality Assurance.")
+
+        tf_project_dir = f"{g.TF_STATS_DIR}/{project.id}_{project.name}"
+        with TemporaryDirectory(
+            prefix=f"stats-{project.id}-", dir=g.STORAGE_DIR
+        ) as project_fs_dir:
+            run_state = u.StatsRunState()
+            force_stats_recalc, _cache = u.pull_cache(
+                team.id,
+                project.id,
+                tf_project_dir,
+                project_fs_dir,
+                run_state,
+            )
+
+            json_project_meta = g.api.project.get_meta(project.id)
+            try:
+                project_meta = sly.ProjectMeta.from_json(json_project_meta)
+            except Exception:
+                json_project_meta = u.handle_broken_project_meta(json_project_meta)
+                project_meta = sly.ProjectMeta.from_json(json_project_meta)
+            datasets = g.api.dataset.get_list(project.id, recursive=True)
+            project_stats = g.api.project.get_stats(project.id)
+
+            sly.logger.log(g._INFO, f"Processing for the '{project.name}' project")
+            sly.logger.log(
+                g._INFO,
+                f"with the USER_ID={user_id} TEAM_ID={team.id} WORKSPACE_ID={workspace.id} PROJECT_ID={project.id}",
+            )
+            sly.logger.log(g._INFO, f"with the CHUNK_SIZE={g.CHUNK_SIZE} (images per batch)")
+            sly.logger.log(
+                g._INFO,
+                f"The project consists of {project.items_count} images and has {project.datasets_count} datasets",
+            )
+
+            stats = _build_stats(project_meta, project_stats, datasets)
+            heatmaps = dtools.ClassesHeatmaps(project_meta, project_stats)
+
+            if g.api.file.dir_exists(team.id, tf_project_dir):
+                mandatory_class_stats = (
+                    dtools.OverviewPie,
+                    dtools.OverviewDonut,
+                    dtools.ClassBalance,
+                    dtools.ClassCooccurrence,
+                    dtools.ClassesPerImage,
+                    dtools.DatasetsAnnotations,
+                    dtools.ObjectsDistribution,
+                    dtools.ObjectSizes,
+                    dtools.ClassSizes,
+                    dtools.ClassesTreemap,
                 )
-                # Wait for directory to be released
-                max_wait = 300  # 5 minutes maximum
-                wait_time = 0
-                while os.path.exists(lock_file_path) and wait_time < max_wait:
-                    time.sleep(5)
-                    wait_time += 5
-                if os.path.exists(lock_file_path):
-                    sly.logger.log(
-                        g._WARNING, f"Timeout waiting for directory lock. Proceeding anyway."
+                optional_tag_stats = (
+                    dtools.TagsImagesCooccurrence,
+                    dtools.TagsObjectsCooccurrence,
+                    dtools.ClassToTagCooccurrence,
+                    dtools.TagsImagesOneOfDistribution,
+                    dtools.TagsObjectsOneOfDistribution,
+                )
+                for stat in stats:
+                    path = f"{tf_project_dir}/{stat.basename_stem}.json"
+                    if isinstance(stat, mandatory_class_stats) and not g.api.file.exists(
+                        team.id, path
+                    ):
+                        force_stats_recalc = True
+                        sly.logger.log(
+                            g._WARNING,
+                            f"The calcuated stat {stat.basename_stem!r} does not exist. "
+                            "Forcing full stats recalculation...",
+                        )
+                    if (
+                        isinstance(stat, optional_tag_stats)
+                        and g.api.file.exists(team.id, path)
+                        and u.applicability_test(stat) is False
+                    ):
+                        g.api.file.remove_file(team.id, path)
+                        sly.logger.log(
+                            g._INFO,
+                            f"The applicability of tag stat {stat.basename_stem!r} has been changed. "
+                            "Deleting the old stat from team files.",
+                        )
+
+            images_all_dct = u.get_project_images_all(datasets)
+            updated_images, changed_object_class_ids, _cache, is_meta_changed = (
+                u.get_updated_images_and_classes(
+                    project,
+                    project_meta,
+                    datasets,
+                    images_all_dct,
+                    force_stats_recalc,
+                    _cache,
+                )
+            )
+            total_updated = sum(len(lst) for lst in updated_images.values())
+
+            if getattr(project, "items_count", None) is None:
+                force_stats_recalc = True
+                is_updated_images_count_valid = True
+            else:
+                is_updated_images_count_valid = total_updated < project.items_count
+
+            stats_changed = force_stats_recalc or total_updated > 0 or is_meta_changed
+            heatmap_exists, heatmap_status = _get_heatmap_state(
+                team.id, project.id, tf_project_dir, heatmaps
+            )
+            rebuild_heatmaps = _should_rebuild_heatmaps(
+                stats_changed, heatmap_exists, heatmap_status
+            )
+            report_heatmap_failure = rebuild_heatmaps
+
+            if not stats_changed:
+                if rebuild_heatmaps:
+                    heatmaps_image_ids, heatmaps_figure_ids = u.collect_heatmap_sample(
+                        images_all_dct, project_stats, project
                     )
-
-            # Create lock file to indicate this process is working with the directory
-            with open(lock_file_path, "w") as f:
-                f.write(f"Locked by process at {datetime.now(timezone.utc).isoformat()}")
-
-            sly.fs.clean_dir(project_fs_dir)
-        except Exception as e:
-            sly.logger.log(g._WARNING, f"Error handling directory lock: {e}")
-            # Continue even if lock failed to avoid blocking the entire process
-    os.makedirs(project_fs_dir, exist_ok=True)
-
-    if g.api.file.dir_exists(team.id, tf_project_dir):
-        mandatory_class_stats = (
-            dtools.OverviewPie,
-            dtools.OverviewDonut,
-            dtools.ClassBalance,
-            dtools.ClassCooccurrence,
-            dtools.ClassesPerImage,
-            dtools.DatasetsAnnotations,
-            dtools.ObjectsDistribution,
-            dtools.ObjectSizes,
-            dtools.ClassSizes,
-            dtools.ClassesTreemap,
-        )
-        optional_tag_stats = (
-            dtools.TagsImagesCooccurrence,
-            dtools.TagsObjectsCooccurrence,
-            dtools.ClassToTagCooccurrence,
-            dtools.TagsImagesOneOfDistribution,
-            dtools.TagsObjectsOneOfDistribution,
-        )
-        for stat in stats:
-            path = f"{tf_project_dir}/{stat.basename_stem}.json"
-            if isinstance(stat, mandatory_class_stats):
-                if not g.api.file.exists(team.id, path):
-                    force_stats_recalc = True
-                    sly.logger.log(
-                        g._WARNING,
-                        f"The calcuated stat {stat.basename_stem!r} does not exist. Forcing full stats recalculation...",
+                    _start_heatmap_thread(
+                        team,
+                        tf_project_dir,
+                        project.id,
+                        heatmaps,
+                        heatmaps_image_ids,
+                        heatmaps_figure_ids,
+                        before_publish=lock_heartbeat.ensure_owned,
+                        on_complete=release_active_request,
                     )
-            if isinstance(stat, optional_tag_stats):
-                if g.api.file.exists(team.id, path) and u.applicability_test(stat) is False:
-                    g.api.file.remove_file(team.id, path)
+                    lock_release_transferred = True
+                    report_heatmap_failure = False
+                elif heatmap_status == "running":
                     sly.logger.log(
                         g._INFO,
-                        f"The applicability of tag stat {stat.basename_stem!r} has been changed. Deleting the old stat from team files.",
+                        "Heatmaps are still running. Frontend will check availability.",
                     )
 
-    images_all_dct = u.get_project_images_all(datasets)
-    updated_images, changed_object_class_ids, _cache, is_meta_changed = u.get_updated_images_and_classes(
-        project, project_meta, datasets, images_all_dct, force_stats_recalc, _cache
-    )
-    total_updated = sum(len(lst) for lst in updated_images.values())
-    if total_updated == 0 and not is_meta_changed:
-        sly.logger.log(g._INFO, "Nothing to update. Skipping stats calculation...")
-
-        # Clean up lock file before early exit to prevent deadlock
-        lock_file_path = f"{project_fs_dir}/.processing.lock"
-        sly.fs.silent_remove(lock_file_path)
-
-        if isinstance(active_project_path_tf, str):
-            g.api.file.remove(team.id, active_project_path_tf)
-        return JSONResponse({"message": "Nothing to update. Skipping stats calculation..."})
-
-    # Check for heatmaps status to decide if need to wait or recalculate
-    if g.api.file.dir_exists(team.id, tf_project_dir):
-        heatmaps_path = f"{tf_project_dir}/{heatmaps.basename_stem}.png"
-
-        if not g.api.file.exists(team.id, heatmaps_path):
-            heatmaps_status = dtools.heatmap_status_endpoint(g.api, project.id)
-            if heatmaps_status["status"] == "running":
-                sly.logger.log(
-                    g._INFO,
-                    f"Heatmaps status is {heatmaps_status['status']!r}. Frontend will check availability.",
+                sly.logger.log(g._INFO, "Nothing to update. Skipping stats calculation...")
+                return JSONResponse(
+                    {"message": "Nothing to update. Skipping stats calculation..."}
                 )
-            elif heatmaps_status["status"] in {"failed", "stale", "unknown"}:
-                sly.logger.log(
-                    g._WARNING,
-                    f"Heatmaps status is {heatmaps_status['status']!r}. Will calculate heatmaps.",
+
+            if g.api.file.dir_exists(team.id, tf_project_dir) and is_updated_images_count_valid:
+                force_stats_recalc = u.download_stats_chunks_to_buffer(
+                    team.id,
+                    project,
+                    tf_project_dir,
+                    project_fs_dir,
+                    force_stats_recalc,
+                    run_state,
+                    stats,
                 )
-                force_heatmaps_recalc = True
-            elif heatmaps_status["status"] != "skipped":
-                sly.logger.log(
-                    g._INFO,
-                    f"Heatmaps not found. Will calculate them.",
-                )
-                force_heatmaps_recalc = True
 
-    if getattr(project, "items_count", None) is None:
-        force_stats_recalc = True
-        is_updated_images_count_valid = True
-    else:
-        is_updated_images_count_valid = total_updated < project.items_count
-
-    if g.api.file.dir_exists(team.id, tf_project_dir) is True and is_updated_images_count_valid:
-        force_stats_recalc = u.download_stats_chunks_to_buffer(
-            team.id, project, tf_project_dir, project_fs_dir, force_stats_recalc
-        )
-        # When recalculating stats, also mark heatmaps for recalculation
-        if force_stats_recalc:
-            force_heatmaps_recalc = True
-
-    # If recalculating stats, also need to recalculate heatmaps
-    if force_stats_recalc is True:
-        force_heatmaps_recalc = True
-
-    if force_heatmaps_recalc is True:
-        HeatmapStatusReporter(g.api, project.id, logger=sly.logger).running(
-            "queued",
-            "Statistics are being prepared before heatmap generation.",
-            progress=0,
-        )
-
-    idx_to_infos, infos_to_idx = u.get_indexes_dct(project.id, datasets, images_all_dct)
-    updated_images = u.check_idxs_integrity(
-        project,
-        datasets,
-        stats,
-        project_fs_dir,
-        idx_to_infos,
-        updated_images,
-        images_all_dct,
-        force_stats_recalc,
-    )
-
-    total_updated = sum(len(lst) for lst in updated_images.values())
-    is_full_stats_recalc = force_stats_recalc or (
-        getattr(project, "items_count", None) is not None
-        and total_updated == project.items_count
-    )
-    if not is_full_stats_recalc:
-        updated_images, meta_affected_chunks, force_full_from_meta = (
-            u.add_changed_class_chunks_to_updated_images(
+            idx_to_infos, infos_to_idx = u.get_indexes_dct(
+                project.id, datasets, images_all_dct
+            )
+            updated_images = u.check_idxs_integrity(
+                project,
+                datasets,
+                stats,
+                project_fs_dir,
+                idx_to_infos,
                 updated_images,
-                changed_object_class_ids,
+                images_all_dct,
+                force_stats_recalc,
+            )
+
+            total_updated = sum(len(lst) for lst in updated_images.values())
+            is_full_stats_recalc = force_stats_recalc or (
+                getattr(project, "items_count", None) is not None
+                and total_updated == project.items_count
+            )
+            if not is_full_stats_recalc:
+                updated_images, _, force_full_from_meta = (
+                    u.add_changed_class_chunks_to_updated_images(
+                        updated_images,
+                        changed_object_class_ids,
+                        project_fs_dir,
+                        idx_to_infos,
+                        infos_to_idx,
+                        images_all_dct,
+                    )
+                )
+                if force_full_from_meta:
+                    force_stats_recalc = True
+
+            total_updated = sum(len(lst) for lst in updated_images.values())
+            is_final_full_recalc = force_stats_recalc or (
+                getattr(project, "items_count", None) is not None
+                and total_updated == project.items_count
+            )
+            if is_final_full_recalc:
+                run_state.chunks_latest_datetime = None
+
+            tf_all_paths = []
+            if g.api.file.dir_exists(team.id, tf_project_dir):
+                tf_all_paths = [
+                    info.path
+                    for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
+                ]
+            u.calculate_stats_and_save_chunks(
+                updated_images,
+                stats,
+                tf_all_paths,
                 project_fs_dir,
                 idx_to_infos,
                 infos_to_idx,
-                images_all_dct,
+                run_state,
             )
-        )
-        if force_full_from_meta:
-            force_stats_recalc = True
+            sly.logger.log(g._INFO, "Stats calculation finished.")
+            lock_heartbeat.ensure_owned()
+            u.remove_junk(
+                team.id,
+                tf_project_dir,
+                project,
+                datasets,
+                project_fs_dir,
+                run_state,
+            )
+            u.sew_chunks_to_json(
+                stats, project_fs_dir, changed_object_class_ids, is_meta_changed
+            )
+            _publish_stats(
+                team,
+                project,
+                stats,
+                tf_project_dir,
+                project_fs_dir,
+                datasets,
+                _cache,
+                run_state,
+                lock_heartbeat.ensure_owned,
+            )
 
-        if meta_affected_chunks > 0 or force_full_from_meta:
-            force_heatmaps_recalc = True
-            tf_status_ok = f"{tf_project_dir}/_cache/heatmaps/status_ok"
-            tf_status_in_progress = f"{tf_project_dir}/_cache/heatmaps/status_in_progress"
-            g.api.file.remove(team.id, tf_status_ok)
-            g.api.file.remove(team.id, tf_status_in_progress)
+            heatmaps_image_ids, heatmaps_figure_ids = u.collect_heatmap_sample(
+                images_all_dct, project_stats, project
+            )
+            _start_heatmap_thread(
+                team,
+                tf_project_dir,
+                project.id,
+                heatmaps,
+                heatmaps_image_ids,
+                heatmaps_figure_ids,
+                before_publish=lock_heartbeat.ensure_owned,
+                on_complete=release_active_request,
+            )
+            lock_release_transferred = True
+            report_heatmap_failure = False
 
-    total_updated = sum(len(lst) for lst in updated_images.values())
-
-    tf_all_paths = [info.path for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)]
-
-    heatmaps_image_ids, heatmaps_figure_ids = u.calculate_stats_and_save_chunks(
-        updated_images,
-        stats,
-        tf_all_paths,
-        project_fs_dir,
-        idx_to_infos,
-        infos_to_idx,
-        project_stats,
-        project,
-    )
-    sly.logger.log(g._INFO, "Stats calculation finished.")
-    u.remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir)
-    u.sew_chunks_to_json(stats, project_fs_dir, changed_object_class_ids, is_meta_changed)
-
-    sly.logger.log(g._INFO, "Start threading of 'calculate_and_save_heatmaps'")
-    thread1 = threading.Thread(
-        target=u.calculate_and_upload_heatmaps,
-        args=(
-            team,
-            tf_project_dir,
-            project_fs_dir,
-            project.id,
-            heatmaps,
-            heatmaps_image_ids,
-            heatmaps_figure_ids,
-        ),
-    )
-    thread1.start()
-
-    sly.logger.log(g._INFO, "Start threading of 'archive_chunks_and_upload'")
-    thread2 = threading.Thread(
-        target=u.archive_chunks_and_upload,
-        args=(team, project, stats, tf_project_dir, project_fs_dir, datasets),
-    )
-    thread2.start()
-
-    u.upload_sewed_stats(team.id, project_fs_dir, tf_project_dir)
-    u.push_cache(team.id, project.id, tf_project_dir, project_fs_dir, _cache)
-
-    # Wait only for archive thread (thread2) to complete before releasing the lock
-    # Heatmaps thread (thread1) can continue in background - next request will wait for it if needed
-    sly.logger.log(g._INFO, "Waiting for archive thread to complete...")
-    thread2.join()
-    sly.logger.log(g._INFO, "Archive thread completed")
-
-    # Clean up lock file after stats processing is complete
-    # Heatmaps thread continues in background
-    lock_file_path = f"{project_fs_dir}/.processing.lock"
-    sly.fs.silent_remove(lock_file_path)
-
-    # Release the project lock - stats are ready, heatmaps will be calculated in background
-    if isinstance(active_project_path_tf, str):
-        g.api.file.remove(team.id, active_project_path_tf)
-
-    sly.logger.log(
-        g._INFO, "Stats calculation completed. Heatmaps are being calculated in background."
-    )
-    return JSONResponse(
-        {"message": f"The statistics were updated: {total_updated} images were calculated"}
-    )
+            sly.logger.log(
+                g._INFO,
+                "Stats calculation completed. Heatmaps are being calculated in background.",
+            )
+            return JSONResponse(
+                {
+                    "message": f"The statistics were updated: {total_updated} images were calculated"
+                }
+            )
+    except Exception as e:
+        if (
+            not isinstance(e, u.ActiveRequestOwnershipError)
+            and active_request_lock is not None
+            and report_heatmap_failure
+        ):
+            _report_stats_failure_if_owned(
+                project.id, e, lock_heartbeat.ensure_owned
+            )
+        raise
+    finally:
+        if active_request_lock is not None and not lock_release_transferred:
+            release_active_request()

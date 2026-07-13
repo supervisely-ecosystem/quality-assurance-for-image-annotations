@@ -1,27 +1,8 @@
-import json
-import os
-import time
-from tqdm import tqdm
-import cv2
-import numpy as np
-
-import src.globals as g
-import src.utils as u
-import supervisely as sly
-from supervisely.io.fs import get_file_name_with_ext
 from supervisely.app.widgets import (
     Button,
     Card,
     Container,
-    Editor,
-    Empty,
-    Image,
-    SelectItem,
-    Text,
-    SelectProject,
 )
-
-import dataset_tools as dtools
 
 button_stats = Button(text="Calculate")
 # button_save = Button(text="Save settings")
