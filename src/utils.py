@@ -3,6 +3,7 @@ from packaging.version import Version
 import tarfile
 import os
 import math
+from tempfile import TemporaryDirectory
 from typing import List, Dict, Tuple, Union, Set
 import dataset_tools as dtools
 from dataset_tools.repo.heatmap_status import HeatmapStatusReporter
@@ -648,7 +649,6 @@ def calculate_and_upload_heatmaps(
     heatmaps_figure_ids: Dict[int, Set[int]],
 ):
     heatmaps_name = f"{heatmaps.basename_stem}.png"
-    fs_heatmap_path = f"{project_fs_dir}/{heatmaps_name}"
     tf_heatmap_path = f"{tf_project_dir}/{heatmaps_name}"
     heatmaps_status = HeatmapStatusReporter(g.api, project_id, logger=sly.logger)
 
@@ -690,16 +690,20 @@ def calculate_and_upload_heatmaps(
             progress=0.8,
             output_path=tf_heatmap_path,
         )
-        heatmaps.to_image(fs_heatmap_path)
+        with TemporaryDirectory(
+            prefix=f".heatmaps-{project_id}-", dir=os.path.dirname(project_fs_dir)
+        ) as render_dir:
+            fs_heatmap_path = os.path.join(render_dir, heatmaps_name)
+            heatmaps.to_image(fs_heatmap_path)
 
-        stage = "uploading"
-        heatmaps_status.running(
-            stage,
-            "Uploading heatmap image.",
-            progress=0.95,
-            output_path=tf_heatmap_path,
-        )
-        g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
+            stage = "uploading"
+            heatmaps_status.running(
+                stage,
+                "Uploading heatmap image.",
+                progress=0.95,
+                output_path=tf_heatmap_path,
+            )
+            g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
         sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
         heatmaps_status.success(
             "Heatmap generation completed successfully.",
