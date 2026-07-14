@@ -1,4 +1,5 @@
 import json
+import hashlib
 from packaging.version import Version
 import tarfile
 import os
@@ -78,6 +79,7 @@ def pull_cache(
         return True, {}
 
     images = _cache.get("images")
+    figure_signatures = _cache.get("figure_signatures", {})
     meta = _cache.get("meta")
     smeta = _cache.get("stats_meta")
 
@@ -166,6 +168,7 @@ def pull_cache(
 
     try:
         images = {int(k): v for k, v in images.items()}
+        figure_signatures = {int(k): v for k, v in figure_signatures.items()}
     except (AttributeError, TypeError, ValueError) as e:
         sly.logger.log(
             g._WARNING,
@@ -177,14 +180,12 @@ def pull_cache(
     _cache["stats_meta"] = smeta
     _cache["meta"] = meta
     _cache["images"] = images
+    _cache["figure_signatures"] = figure_signatures
     return False, _cache
 
 
 def get_iso_timestamp():
-    now = datetime.now()
-    ts = datetime.timestamp(now)
-    dt = datetime.utcfromtimestamp(ts)
-    return str(dt.isoformat()) + "Z"
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def push_cache(
@@ -402,7 +403,7 @@ def check_idxs_integrity(
                     return images_all_dct
 
                 for path in files:
-                    np.load(path, allow_pickle=True)
+                    _validate_npy_header(path)
         except Exception:
             sly.logger.log(g._WARNING, "Error while integrity checking. Recalc full stats.")
             return images_all_dct
@@ -595,7 +596,7 @@ def download_stats_chunks_to_buffer(
     if run_state.chunks_latest_datetime is None:
         sly.logger.log(
             g._WARNING,
-            "The chunks identifier of latest datetime is not existed.  Recalculating full stats.",
+            "The latest chunks identifier does not exist. Recalculating full stats.",
         )
         return True
     cached_chunks_dt = run_state.chunks_latest_datetime.isoformat()
@@ -607,7 +608,7 @@ def download_stats_chunks_to_buffer(
     if file is None:
         sly.logger.log(
             g._WARNING,
-            f"The chunks archive file is not existed: '{archive_name}'.  Recalculating full stats.",
+            f"The chunks archive does not exist: '{archive_name}'. Recalculating full stats.",
         )
         return True
     tf_chunks_dt = ".".join(sly.fs.get_file_name(file.path).split(".")[:-1]).split("_")[-1]
@@ -675,6 +676,17 @@ def _validate_chunks_archive_members(members, allowed_stat_dirs: Set[str]):
         raise ValueError(f"Unexpected member in chunks archive: {member.name!r}")
 
 
+def _validate_npy_header(path: str) -> None:
+    with open(path, "rb") as file:
+        version = np.lib.format.read_magic(file)
+        if version == (1, 0):
+            np.lib.format.read_array_header_1_0(file)
+        elif version == (2, 0):
+            np.lib.format.read_array_header_2_0(file)
+        else:
+            raise ValueError(f"Unsupported .npy format version {version!r}: {path}")
+
+
 @sly.timeit
 def calculate_stats_and_save_chunks(
     updated_images,
@@ -684,7 +696,10 @@ def calculate_stats_and_save_chunks(
     chunk_to_images,
     image_to_chunk,
     run_state: StatsRunState,
-) -> None:
+    figure_signatures: Dict[int, str],
+    changed_image_ids: Set[int],
+) -> bool:
+    figures_changed = False
     total_updated = sum(len(lst) for lst in updated_images.values())
     if total_updated == 0 and run_state.chunks_latest_datetime is None:
         run_state.chunks_latest_datetime = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -703,6 +718,12 @@ def calculate_stats_and_save_chunks(
                 for batch_infos in sly.batched(images_chunk, 100):
                     batch_ids = [x.id for x in batch_infos]
                     figures = g.api.image.figure.download(dataset_id, batch_ids, skip_geometry=True)
+                    if _update_figure_signatures(
+                        {image_id: figures.get(image_id, []) for image_id in batch_ids},
+                        changed_image_ids,
+                        figure_signatures,
+                    ):
+                        figures_changed = True
                     for image in batch_infos:
                         figs = figures.get(image.id, [])
                         for stat in stats:
@@ -722,6 +743,25 @@ def calculate_stats_and_save_chunks(
 
         # if pbar.last_print_n < pbar.total:  # unlabeled images
         #     pbar.update(pbar.total - pbar.n)
+
+    return figures_changed
+
+
+def _update_figure_signatures(
+    figures_by_image: Dict[int, List[FigureInfo]],
+    changed_image_ids: Set[int],
+    figure_signatures: Dict[int, str],
+) -> bool:
+    figures_changed = False
+    for image_id, figures in figures_by_image.items():
+        parts = sorted(
+            (figure.id, figure.class_id, str(figure.updated_at)) for figure in figures
+        )
+        signature = hashlib.sha256(repr(parts).encode("utf-8")).hexdigest()
+        if image_id in changed_image_ids and figure_signatures.get(image_id) != signature:
+            figures_changed = True
+        figure_signatures[image_id] = signature
+    return figures_changed
 
 
 # @sly.timeit
@@ -927,7 +967,7 @@ def calculate_and_upload_heatmaps(
                 output_path=tf_heatmap_path,
             )
             g.api.file.upload(team.id, fs_heatmap_path, tf_heatmap_path)
-        sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was succesfully uploaded.")
+        sly.logger.log(g._INFO, f"The {heatmaps_name!r} file was successfully uploaded.")
         ensure_publish_allowed()
         heatmaps_status.success(
             "Heatmap generation completed successfully.",
@@ -992,7 +1032,7 @@ def archive_chunks_and_upload(
         g.api.file.upload(team.id, src_path, dst_path, progress_cb=pbar)
 
     remove_junk(team.id, tf_project_dir, project, datasets, project_fs_dir, run_state)
-    sly.logger.log(g._INFO, f"The '{archive_name}' file was succesfully uploaded.")
+    sly.logger.log(g._INFO, f"The '{archive_name}' file was successfully uploaded.")
 
 
 @sly.timeit
@@ -1012,7 +1052,8 @@ def upload_sewed_stats(team_id, curr_projectfs_dir, curr_tf_project_dir):
         g.api.file.upload_bulk(team_id, stats_paths, dst_json_paths, pbar)
 
     sly.logger.log(
-        g._INFO, f"{len(stats_paths)} updated .json and .png stats succesfully updated and uploaded"
+        g._INFO,
+        f"{len(stats_paths)} updated .json and .png stats successfully updated and uploaded",
     )
 
 

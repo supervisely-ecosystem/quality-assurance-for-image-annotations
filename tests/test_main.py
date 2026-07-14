@@ -130,21 +130,73 @@ class ActiveRequestCleanupTest(unittest.TestCase):
         file_api.remove.assert_called_once_with(2, file.path)
 
     def test_heartbeat_refreshes_owned_lock_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_path = os.path.join(temp_dir, "lock")
+            with open(local_path, "w", encoding="utf-8") as lock_file:
+                lock_file.write("original")
+            lock = main._ActiveRequestLock(
+                project_id=1,
+                local_path=local_path,
+                tf_path=self.lock.tf_path,
+                content_hash="owned-hash",
+            )
+            file_api = SimpleNamespace(
+                get_info_by_path=Mock(
+                    side_effect=[
+                        SimpleNamespace(hash="owned-hash"),
+                        SimpleNamespace(hash="refreshed-hash"),
+                    ]
+                ),
+                upload=Mock(return_value=SimpleNamespace(hash="refreshed-hash")),
+            )
+            heartbeat = main._ActiveRequestHeartbeat(self.team.id, lock)
+
+            with patch.object(main.g, "api", SimpleNamespace(file=file_api)):
+                heartbeat._refresh_lock()
+
+            self.assertEqual(file_api.get_info_by_path.call_count, 2)
+            file_api.upload.assert_called_once_with(2, local_path, self.lock.tf_path)
+            self.assertEqual(lock.content_hash, "refreshed-hash")
+            with open(local_path, encoding="utf-8") as lock_file:
+                self.assertNotEqual(lock_file.read(), "original")
+
+    def test_running_heatmap_returns_in_progress_without_waiting(self):
+        file = SimpleNamespace(
+            path="/stats/_active_requests/1",
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
         file_api = SimpleNamespace(
-            get_info_by_path=Mock(return_value=SimpleNamespace(hash="owned-hash")),
-            upload=Mock(return_value=SimpleNamespace(hash="owned-hash")),
+            get_info_by_path=Mock(return_value=file),
+            exists=Mock(return_value=True),
+            remove=Mock(),
         )
-        heartbeat = main._ActiveRequestHeartbeat(self.team.id, self.lock)
 
-        with patch.object(main.g, "api", SimpleNamespace(file=file_api)):
-            heartbeat._refresh_lock()
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            main.g, "ACTIVE_REQUESTS_DIR", temp_dir
+        ), patch.object(main.g, "api", SimpleNamespace(file=file_api)), patch.object(
+            main.dtools,
+            "heatmap_status_endpoint",
+            return_value={"status": "running"},
+        ), patch.object(main.time, "sleep") as sleep:
+            with self.assertRaises(main.ActiveRequestInProgressError):
+                main.check_if_QA_tab_is_active(self.team, self.project)
 
-        self.assertEqual(file_api.get_info_by_path.call_count, 2)
-        file_api.upload.assert_called_once_with(
-            2,
-            self.lock.local_path,
-            self.lock.tf_path,
-        )
+            self.assertTrue(os.path.isfile(os.path.join(temp_dir, "1.lock")))
+            sleep.assert_not_called()
+
+    @patch.object(main, "_release_active_project_request")
+    @patch.object(
+        main,
+        "check_if_QA_tab_is_active",
+        side_effect=main.ActiveRequestInProgressError("running"),
+    )
+    def test_main_returns_202_when_heatmap_is_running(self, _acquire, release):
+        with patch.object(main.g, "initialize_log_levels"):
+            response = main.main_func(None, self.team, self.workspace, self.project)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertIn(b"already in progress", response.body)
+        release.assert_not_called()
 
     def test_release_does_not_remove_foreign_lock(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -359,8 +411,49 @@ class MainNoopTest(unittest.TestCase):
 
         self.assertIn(b"Nothing to update", response.body)
         download_chunks.assert_not_called()
-        collect_heatmap_sample.assert_called_once()
+        collect_heatmap_sample.assert_not_called()
         start_heatmap_thread.assert_called_once()
+
+
+class HeatmapThreadTest(unittest.TestCase):
+    def test_sample_collection_runs_in_background_thread(self):
+        collection_started = threading.Event()
+        allow_collection = threading.Event()
+        collected = ({10: {1}}, {20: {2}})
+
+        def collect(*_args):
+            collection_started.set()
+            allow_collection.wait(timeout=1)
+            return collected
+
+        reporter = Mock()
+        calculate = Mock()
+        on_complete = Mock()
+        before_publish = Mock()
+
+        with patch.object(main, "HeatmapStatusReporter", return_value=reporter), patch.object(
+            main.u, "collect_heatmap_sample", side_effect=collect
+        ), patch.object(main.u, "calculate_and_upload_heatmaps", calculate):
+            thread = main._start_heatmap_thread(
+                SimpleNamespace(id=2),
+                "/stats/project",
+                1,
+                SimpleNamespace(basename_stem="classes_heatmaps"),
+                {10: [SimpleNamespace(id=1)]},
+                {},
+                SimpleNamespace(id=1),
+                before_publish=before_publish,
+                on_complete=on_complete,
+            )
+
+            self.assertTrue(collection_started.wait(timeout=1))
+            self.assertTrue(thread.is_alive())
+            allow_collection.set()
+            thread.join(timeout=1)
+
+        self.assertFalse(thread.is_alive())
+        calculate.assert_called_once()
+        on_complete.assert_called_once()
 
 
 if __name__ == "__main__":

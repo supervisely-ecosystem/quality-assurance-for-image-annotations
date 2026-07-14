@@ -110,6 +110,33 @@ class UtilsTestCase(unittest.TestCase):
         self.assertEqual(state_a.chunks_latest_datetime, datetime(2026, 1, 1))
         self.assertEqual(state_b.chunks_latest_datetime, datetime(2026, 2, 2))
 
+    def test_pull_cache_restores_figure_signature_keys_as_integers(self):
+        payload = self._valid_cache("2026-01-01T00:00:00Z")
+        payload["figure_signatures"] = {"1": "signature"}
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            utils.g,
+            "api",
+            SimpleNamespace(file=CacheFileApi(payload)),
+        ):
+            force, cache = utils.pull_cache(
+                1,
+                10,
+                "/stats/project",
+                temp_dir,
+                utils.StatsRunState(),
+            )
+
+        self.assertFalse(force)
+        self.assertEqual(cache["figure_signatures"], {1: "signature"})
+
+    def test_iso_timestamp_is_timezone_aware_utc(self):
+        timestamp = utils.get_iso_timestamp()
+
+        self.assertTrue(timestamp.endswith("Z"))
+        parsed = datetime.fromisoformat(timestamp.removesuffix("Z") + "+00:00")
+        self.assertIsNotNone(parsed.tzinfo)
+
     def test_pull_cache_treats_corruption_as_cache_miss(self):
         cases = (
             ("invalid JSON", "{"),
@@ -381,6 +408,35 @@ class UtilsTestCase(unittest.TestCase):
 
             self.assertIs(result, all_images)
 
+    def test_integrity_checks_npy_headers_without_loading_payloads(self):
+        project = SimpleNamespace(items_count=1)
+        dataset = SimpleNamespace(items_count=1)
+        expected_chunks = {"chunk_1_2_3": [SimpleNamespace(id=1)]}
+        updated_images = {2: []}
+        all_images = {2: [SimpleNamespace(id=1)]}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stat_dir = Path(temp_dir, DummyStat.basename_stem)
+            stat_dir.mkdir()
+            np.save(
+                stat_dir / "chunk_1_2_3_1000_2026-01-01T00:00:00.npy",
+                np.array([{"value": 1}], dtype=object),
+            )
+
+            with patch.object(utils.np, "load", side_effect=AssertionError("payload read")):
+                result = utils.check_idxs_integrity(
+                    project,
+                    [dataset],
+                    [DummyStat()],
+                    temp_dir,
+                    expected_chunks,
+                    updated_images,
+                    all_images,
+                    False,
+                )
+
+        self.assertIs(result, updated_images)
+
     def test_remove_junk_does_not_delete_duplicate_obsolete_chunk_twice(self):
         project = SimpleNamespace(id=3)
         datasets = [SimpleNamespace(id=2)]
@@ -444,10 +500,33 @@ class UtilsTestCase(unittest.TestCase):
                 {},
                 {},
                 state,
+                {},
+                set(),
             )
 
             self.assertIsNotNone(state.chunks_latest_datetime)
             self.assertTrue(Path(temp_dir, DummyStat.basename_stem).is_dir())
+
+    def test_figure_signatures_ignore_image_only_changes(self):
+        figure = SimpleNamespace(id=11, class_id=22, updated_at="2026-01-01T00:00:00Z")
+        signatures = {}
+
+        self.assertTrue(
+            utils._update_figure_signatures({1: [figure]}, {1}, signatures)
+        )
+        self.assertFalse(
+            utils._update_figure_signatures({1: [figure]}, {1}, signatures)
+        )
+
+        changed_figure = SimpleNamespace(
+            id=11,
+            class_id=22,
+            updated_at="2026-01-02T00:00:00Z",
+        )
+        self.assertTrue(
+            utils._update_figure_signatures({1: [changed_figure]}, {1}, signatures)
+        )
+        self.assertTrue(utils._update_figure_signatures({1: []}, {1}, signatures))
 
     def test_collect_heatmap_sample_scans_all_datasets(self):
         images = {

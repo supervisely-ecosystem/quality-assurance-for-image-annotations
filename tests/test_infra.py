@@ -18,6 +18,7 @@ class InfraTests(unittest.TestCase):
             config = json.load(config_file)
 
         self.assertEqual(config["entrypoint"].split()[0:3], ["python", "-m", "uvicorn"])
+        self.assertIs(config["only_for_instance_admins"], True)
 
     def test_create_venv_script_is_valid_and_uses_tracked_requirements(self):
         script_path = ROOT / "create_venv.sh"

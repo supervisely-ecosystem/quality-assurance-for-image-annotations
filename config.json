@@ -5,6 +5,7 @@
   "description": "Get instant DatasetNinja statistics for your project",
   "categories": ["system"],
   "session_tags": ["scalable"],
+  "only_for_instance_admins": true,
   "icon_cover": true,
   "headless": false,
   "entrypoint": "python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --log-level warning",

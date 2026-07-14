@@ -27,7 +27,7 @@ TIMELOCK_LIMIT = 180  # seconds
 LOCK_HEARTBEAT_INTERVAL = 30  # seconds
 
 
-@dataclass(frozen=True)
+@dataclass
 class _ActiveRequestLock:
     project_id: int
     local_path: str
@@ -42,6 +42,7 @@ class _ActiveRequestHeartbeat:
         self._stop_event = threading.Event()
         self._started = False
         self._ownership_error = None
+        self._state_lock = threading.RLock()
         self._thread = threading.Thread(
             target=self._run,
             name=f"stats-lock-heartbeat-{lock.project_id}",
@@ -58,19 +59,23 @@ class _ActiveRequestHeartbeat:
             self._thread.join()
 
     def _refresh_lock(self):
-        self.ensure_owned()
-        uploaded = g.api.file.upload(
-            self._team_id,
-            self._lock.local_path,
-            self._lock.tf_path,
-        )
-        if uploaded.hash != self._lock.content_hash:
-            raise u.ActiveRequestOwnershipError(
-                f"Active request lock {self._lock.tf_path!r} changed during refresh"
+        with self._state_lock:
+            self._ensure_owned_unlocked()
+            with open(self._lock.local_path, "w", encoding="utf-8") as lock_file:
+                lock_file.write(uuid4().hex)
+            uploaded = g.api.file.upload(
+                self._team_id,
+                self._lock.local_path,
+                self._lock.tf_path,
             )
-        self.ensure_owned()
+            self._lock.content_hash = uploaded.hash
+            self._ensure_owned_unlocked()
 
     def ensure_owned(self):
+        with self._state_lock:
+            self._ensure_owned_unlocked()
+
+    def _ensure_owned_unlocked(self):
         if self._ownership_error is not None:
             raise self._ownership_error
         current = g.api.file.get_info_by_path(self._team_id, self._lock.tf_path)
@@ -92,6 +97,10 @@ class _ActiveRequestHeartbeat:
                 sly.logger.warning(
                     f"Failed to refresh active request lock {self._lock.tf_path!r}: {e}"
                 )
+
+
+class ActiveRequestInProgressError(RuntimeError):
+    pass
 
 
 def _get_extra(user_id, team, workspace, project) -> dict:
@@ -176,6 +185,15 @@ def _remove_old_active_project_request(now, team, file):
         )
 
 
+def _heatmap_generation_is_running(project_id: int) -> bool:
+    try:
+        status = dtools.heatmap_status_endpoint(g.api, project_id)
+        return status.get("status") == "running"
+    except Exception as e:
+        sly.logger.warning(f"Failed to check heatmap status for project {project_id}: {e}")
+        return False
+
+
 def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> _ActiveRequestLock:
     """
     Checks if the QA tab is active for the project and waits in queue if busy.
@@ -228,6 +246,10 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> _ActiveRe
                 try:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except IOError:
+                    if _heatmap_generation_is_running(project.id):
+                        raise ActiveRequestInProgressError(
+                            f"Heatmap generation for project {project.id} is already in progress"
+                        )
                     # Lock is already held by another request in this app instance
                     # Wait and retry
                     if attempt == 1:
@@ -246,6 +268,10 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> _ActiveRe
 
                     # Check if file still exists after cleanup
                     if g.api.file.exists(team.id, file.path) is True:
+                        if _heatmap_generation_is_running(project.id):
+                            raise ActiveRequestInProgressError(
+                                f"Heatmap generation for project {project.id} is already in progress"
+                            )
                         # Another app instance is processing - release local lock and wait
                         if attempt == 1:
                             sly.logger.log(
@@ -293,7 +319,6 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> _ActiveRe
                         f"Project {project.id} lock acquired after waiting {wait_time} seconds",
                     )
 
-                sly.fs.silent_remove(lock_file_path)
                 sly.logger.log(g._INFO, "Finish checking if 'QA & Stats' tab is active.")
                 return _ActiveRequestLock(
                     project_id=project.id,
@@ -302,10 +327,10 @@ def check_if_QA_tab_is_active(team: TeamInfo, project: ProjectInfo) -> _ActiveRe
                     content_hash=uploaded.hash,
                 )
 
+        except ActiveRequestInProgressError:
+            raise
         except Exception as e:
             sly.logger.error(f"Error in check_if_QA_tab_is_active: {e}")
-            # Clean up lock file
-            sly.fs.silent_remove(lock_file_path)
             raise
 
 
@@ -369,8 +394,9 @@ def _start_heatmap_thread(
     tf_project_dir,
     project_id,
     heatmaps,
-    heatmaps_image_ids,
-    heatmaps_figure_ids,
+    images_all_dct,
+    project_stats,
+    project,
     before_publish=None,
     on_complete=None,
 ):
@@ -384,6 +410,40 @@ def _start_heatmap_thread(
 
     def run_heatmaps():
         try:
+            try:
+                if before_publish is not None:
+                    before_publish()
+                HeatmapStatusReporter(g.api, project_id, logger=sly.logger).running(
+                    "collecting_sample",
+                    "Collecting a project-wide heatmap sample.",
+                    progress=0.05,
+                )
+                heatmaps_image_ids, heatmaps_figure_ids = u.collect_heatmap_sample(
+                    images_all_dct, project_stats, project
+                )
+            except u.ActiveRequestOwnershipError as e:
+                sly.logger.warning(
+                    f"Heatmap sample collection cancelled after lock ownership changed: {e}"
+                )
+                return
+            except Exception as e:
+                sly.logger.error(f"Error collecting heatmap sample: {e!r}")
+                try:
+                    if before_publish is not None:
+                        before_publish()
+                except Exception as ownership_error:
+                    sly.logger.warning(
+                        "Heatmap sampling failure status was not published because lock "
+                        f"ownership could not be verified: {ownership_error}"
+                    )
+                    return
+                HeatmapStatusReporter(g.api, project_id, logger=sly.logger).failed(
+                    e,
+                    stage="collecting_sample",
+                    message="Failed to collect the project-wide heatmap sample.",
+                )
+                return
+
             u.calculate_and_upload_heatmaps(
                 team,
                 tf_project_dir,
@@ -483,7 +543,13 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
             )
 
     try:
-        active_request_lock = check_if_QA_tab_is_active(team, project)
+        try:
+            active_request_lock = check_if_QA_tab_is_active(team, project)
+        except ActiveRequestInProgressError:
+            return JSONResponse(
+                {"message": "Heatmap generation is already in progress."},
+                status_code=202,
+            )
         lock_heartbeat = _ActiveRequestHeartbeat(team.id, active_request_lock)
         lock_heartbeat.start()
         sly.logger.log(g._INFO, "Start Quality Assurance.")
@@ -552,7 +618,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                         force_stats_recalc = True
                         sly.logger.log(
                             g._WARNING,
-                            f"The calcuated stat {stat.basename_stem!r} does not exist. "
+                            f"The calculated stat {stat.basename_stem!r} does not exist. "
                             "Forcing full stats recalculation...",
                         )
                     if (
@@ -568,6 +634,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                         )
 
             images_all_dct = u.get_project_images_all(datasets)
+            cached_image_ids = set(_cache.get("images", {}))
             updated_images, changed_object_class_ids, _cache, is_meta_changed = (
                 u.get_updated_images_and_classes(
                     project,
@@ -579,6 +646,16 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                 )
             )
             total_updated = sum(len(lst) for lst in updated_images.values())
+            changed_image_ids = {
+                image.id for images in updated_images.values() for image in images
+            }
+            current_image_ids = {
+                image.id for images in images_all_dct.values() for image in images
+            }
+            image_set_changed = cached_image_ids != current_image_ids
+            figure_signatures = _cache.setdefault("figure_signatures", {})
+            for removed_image_id in set(figure_signatures) - current_image_ids:
+                del figure_signatures[removed_image_id]
 
             if getattr(project, "items_count", None) is None:
                 force_stats_recalc = True
@@ -587,26 +664,31 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                 is_updated_images_count_valid = total_updated < project.items_count
 
             stats_changed = force_stats_recalc or total_updated > 0 or is_meta_changed
+            # Image timestamps also change for tag-only updates. Figure signatures below
+            # decide whether image changes actually invalidate the heatmap.
+            heatmap_inputs_changed = (
+                force_stats_recalc
+                or image_set_changed
+                or len(changed_object_class_ids) > 0
+            )
             heatmap_exists, heatmap_status = _get_heatmap_state(
                 team.id, project.id, tf_project_dir, heatmaps
             )
             rebuild_heatmaps = _should_rebuild_heatmaps(
-                stats_changed, heatmap_exists, heatmap_status
+                heatmap_inputs_changed, heatmap_exists, heatmap_status
             )
             report_heatmap_failure = rebuild_heatmaps
 
             if not stats_changed:
                 if rebuild_heatmaps:
-                    heatmaps_image_ids, heatmaps_figure_ids = u.collect_heatmap_sample(
-                        images_all_dct, project_stats, project
-                    )
                     _start_heatmap_thread(
                         team,
                         tf_project_dir,
                         project.id,
                         heatmaps,
-                        heatmaps_image_ids,
-                        heatmaps_figure_ids,
+                        images_all_dct,
+                        project_stats,
+                        project,
                         before_publish=lock_heartbeat.ensure_owned,
                         on_complete=release_active_request,
                     )
@@ -681,7 +763,7 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                     info.path
                     for info in g.api.file.list2(team.id, tf_project_dir, recursive=True)
                 ]
-            u.calculate_stats_and_save_chunks(
+            figures_changed = u.calculate_stats_and_save_chunks(
                 updated_images,
                 stats,
                 tf_all_paths,
@@ -689,7 +771,10 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                 idx_to_infos,
                 infos_to_idx,
                 run_state,
+                figure_signatures,
+                changed_image_ids,
             )
+            rebuild_heatmaps = rebuild_heatmaps or figures_changed
             sly.logger.log(g._INFO, "Stats calculation finished.")
             lock_heartbeat.ensure_owned()
             u.remove_junk(
@@ -715,26 +800,28 @@ def main_func(user_id: int, team: TeamInfo, workspace: WorkspaceInfo, project: P
                 lock_heartbeat.ensure_owned,
             )
 
-            heatmaps_image_ids, heatmaps_figure_ids = u.collect_heatmap_sample(
-                images_all_dct, project_stats, project
-            )
-            _start_heatmap_thread(
-                team,
-                tf_project_dir,
-                project.id,
-                heatmaps,
-                heatmaps_image_ids,
-                heatmaps_figure_ids,
-                before_publish=lock_heartbeat.ensure_owned,
-                on_complete=release_active_request,
-            )
-            lock_release_transferred = True
+            if rebuild_heatmaps:
+                _start_heatmap_thread(
+                    team,
+                    tf_project_dir,
+                    project.id,
+                    heatmaps,
+                    images_all_dct,
+                    project_stats,
+                    project,
+                    before_publish=lock_heartbeat.ensure_owned,
+                    on_complete=release_active_request,
+                )
+                lock_release_transferred = True
             report_heatmap_failure = False
 
-            sly.logger.log(
-                g._INFO,
-                "Stats calculation completed. Heatmaps are being calculated in background.",
-            )
+            if rebuild_heatmaps:
+                message = (
+                    "Stats calculation completed. Heatmaps are being calculated in background."
+                )
+            else:
+                message = "Stats calculation completed. Existing heatmaps remain valid."
+            sly.logger.log(g._INFO, message)
             return JSONResponse(
                 {
                     "message": f"The statistics were updated: {total_updated} images were calculated"
